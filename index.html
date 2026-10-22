@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Отчёт родительского комитета</title>
-<!-- Локальная библиотека (должна лежать в репозитории) -->
 <script src="xlsx.full.min.js"></script>
 <style>
   :root {
@@ -31,59 +30,45 @@
   .subtitle { color: var(--muted); font-size: 13px; margin: 0; }
   header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
 
-  .table-section {
+  /* Вкладки */
+  .tabs {
+    display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 8px;
+  }
+  .tab-btn {
+    background: transparent; border: none; padding: 8px 16px; font-size: 15px; font-weight: 600;
+    color: var(--muted); cursor: pointer; border-radius: var(--radius-sm); transition: all 0.2s;
+  }
+  .tab-btn:hover { background: var(--border-soft); color: var(--text); }
+  .tab-btn.active { background: var(--accent); color: #fff; }
+
+  .table-section, .dashboard-section {
     background: var(--card); border-radius: var(--radius);
     border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden;
   }
   
-  /* Убрали flex-direction: column, так как подсказка теперь внутри инпута */
-  .toolbar {
-    padding: 16px 20px; border-bottom: 1px solid var(--border-soft);
-  }
-  
-  .search-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  }
-  
+  .toolbar { padding: 16px 20px; border-bottom: 1px solid var(--border-soft); }
+  .search-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .search-wrap { position: relative; flex: 1; min-width: 250px; max-width: 500px; }
-  .search-wrap svg {
-    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-    width: 16px; height: 16px; color: var(--muted); pointer-events: none;
-  }
+  .search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
   .search-wrap input {
     width: 100%; padding: 9px 12px 9px 36px; font-size: 14px;
     border: 1px solid var(--border); border-radius: var(--radius-sm);
-    background: var(--bg); color: var(--text); font-family: inherit;
-    transition: border-color .15s, box-shadow .15s, background .15s;
+    background: var(--bg); color: var(--text); font-family: inherit; transition: border-color .15s, box-shadow .15s;
   }
-  .search-wrap input:focus {
-    outline: none; border-color: var(--accent); background: var(--card);
-    box-shadow: 0 0 0 3px rgba(99,102,241,.1);
-  }
+  .search-wrap input:focus { outline: none; border-color: var(--accent); background: var(--card); box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
   .row-count { font-size: 13px; color: var(--muted); margin-left: auto; }
 
-  .table-wrapper { overflow-x: auto; width: 100%; max-height: 80vh; }
-  
+  .table-wrapper { overflow-x: auto; width: 100%; max-height: 70vh; }
   table { width: auto; min-width: 100%; border-collapse: collapse; font-size: 14px; }
   
   thead { position: sticky; top: 0; z-index: 10; }
-  th {
-    background: #f8fafc; color: var(--muted); font-weight: 600;
-    text-align: left; padding: 12px 16px; font-size: 12px;
-    text-transform: uppercase; letter-spacing: .04em;
-    border-bottom: 1px solid var(--border); white-space: nowrap;
-    user-select: none;
-  }
-
-  #tableHeadTotals th {
-    background: #f1f5f9; color: var(--text); font-weight: 700;
-    text-transform: none; font-size: 14px; padding: 10px 16px;
-    border-bottom: 2px solid var(--border);
-  }
+  th { background: #f8fafc; color: var(--muted); font-weight: 600; text-align: left; padding: 12px 16px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none; }
+  #tableHeadTotals th { background: #f1f5f9; color: var(--text); font-weight: 700; text-transform: none; font-size: 14px; padding: 10px 16px; border-bottom: 2px solid var(--border); }
   #tableHeadTotals th.num { color: var(--success); font-size: 15px; }
 
   td { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
   tbody tr { transition: background .1s; }
+  tbody tr:hover { background: #f8fafc; }
   tbody tr:last-child td { border-bottom: none; }
   tbody tr.hidden { display: none !important; }
 
@@ -98,23 +83,42 @@
   td.paid { color: var(--success); font-weight: 600; }
   td.unpaid { color: var(--danger); font-weight: 600; }
 
-  .loading {
-    display: flex; flex-direction: column; align-items: center;
-    justify-content: center; padding: 80px 20px; color: var(--muted); gap: 16px;
+  /* Дашборд (Вкладка статистики) */
+  .dashboard-section { padding: 24px; }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  
+  .stat-card {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 24px; display: flex; flex-direction: column;
   }
-  .spinner {
-    width: 32px; height: 32px; border: 3px solid var(--border);
-    border-top-color: var(--accent); border-radius: 50%;
-    animation: spin .8s linear infinite;
-  }
+  .stat-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text); display: flex; align-items: center; gap: 8px;}
+  
+  /* Блок сбора средств */
+  .progress-list { display: flex; flex-direction: column; gap: 12px; }
+  .progress-item { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+  .progress-bar-bg { flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; margin: 0 12px; overflow: hidden;}
+  .progress-bar-fill { height: 100%; border-radius: 4px; }
+  .fill-green { background: var(--success); }
+  .fill-yellow { background: #eab308; }
+  .fill-red { background: var(--danger); }
+
+  /* Блок цен */
+  .price-list { display: flex; flex-direction: column; gap: 12px; }
+  .price-item { display: flex; justify-content: space-between; font-size: 14px; padding-bottom: 8px; border-bottom: 1px dashed var(--border); }
+  .price-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .price-item span:first-child { color: var(--muted); }
+  .price-item span:last-child { font-weight: 600; color: var(--text); }
+
+  /* Блок остатка */
+  .reserve-block { text-align: center; padding: 10px 0; }
+  .reserve-value { font-size: 36px; font-weight: 800; color: var(--accent); letter-spacing: -1px; margin-bottom: 8px; }
+  .reserve-desc { font-size: 14px; color: var(--muted); }
+
+  .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--muted); gap: 16px; }
+  .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .error {
-    background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
-    padding: 20px; border-radius: var(--radius);
-    font-size: 14px; line-height: 1.6; margin-top: 20px;
-    word-break: break-word;
-  }
+  .error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 20px; border-radius: var(--radius); font-size: 14px; line-height: 1.6; margin-top: 20px; word-break: break-word; }
   .error code { background: rgba(153,27,27,.08); padding: 2px 6px; border-radius: 4px; font-weight: 600; }
 
   @media (max-width: 768px) {
@@ -122,6 +126,8 @@
     header { flex-direction: column; }
     .row-count { margin: 8px 0 0; text-align: right; width: 100%; }
     #tableHeadTotals th { font-size: 13px; padding: 8px 12px; }
+    .dashboard-section { padding: 16px; }
+    .stats-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -142,35 +148,78 @@
   <div id="error" class="error" hidden></div>
 
   <div id="content" hidden>
-    <section class="table-section">
-      <div class="toolbar">
-        <div class="search-row">
-          <div class="search-wrap">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="7"></circle>
-              <path d="m21 21-4.3-4.3"></path>
-            </svg>
-            <!-- Изменили placeholder -->
-            <input type="search" id="search" placeholder="Введите 2+ буквы фамилии..." autocomplete="off">
+    <!-- Вкладки -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('students')">Мой ребенок</button>
+      <button class="tab-btn" onclick="switchTab('stats')">Статистика класса</button>
+    </div>
+
+    <!-- Вкладка 1: Ученики -->
+    <div id="tab-students">
+      <section class="table-section">
+        <div class="toolbar">
+          <div class="search-row">
+            <div class="search-wrap">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="7"></circle>
+                <path d="m21 21-4.3-4.3"></path>
+              </svg>
+              <input type="search" id="search" placeholder="Введите 2+ буквы фамилии..." autocomplete="off">
+            </div>
+            <span class="row-count" id="rowCount">Список скрыт</span>
           </div>
-          <span class="row-count" id="rowCount">Список скрыт</span>
         </div>
-      </div>
-      <div class="table-wrapper">
-        <table id="dataTable">
-          <thead>
-            <tr id="tableHead"></tr>
-            <tr id="tableHeadTotals"></tr>
-          </thead>
-          <tbody id="tableBody"></tbody>
-        </table>
-      </div>
-    </section>
+        <div class="table-wrapper">
+          <table id="dataTable">
+            <thead>
+              <tr id="tableHead"></tr>
+              <tr id="tableHeadTotals"></tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Вкладка 2: Статистика -->
+    <div id="tab-stats" hidden>
+      <section class="dashboard-section">
+        <div class="stats-grid">
+          
+          <!-- Блок 1: Дисциплина оплаты -->
+          <div class="stat-card">
+            <div class="stat-title">Статус оплаты</div>
+            <div class="progress-list" id="paymentStats">
+              <!-- Заполняется через JS -->
+            </div>
+          </div>
+
+          <!-- Блок 2: Цена мероприятий -->
+          <div class="stat-card">
+            <div class="stat-title">Стоимость на 1 ребенка</div>
+            <div class="price-list" id="costPerChild">
+              <!-- Заполняется через JS -->
+            </div>
+          </div>
+
+          <!-- Блок 3: Финансовый резерв -->
+          <div class="stat-card">
+            <div class="stat-title">Остаток в кассе</div>
+            <div class="reserve-block">
+              <div class="reserve-value" id="reservePerChild">0 ₽</div>
+              <div class="reserve-desc">на каждого ученика (если разделить оставшуюся сумму поровну)</div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </div>
   </div>
 </div>
 
 <script>
-// ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК ОШИБОК
+let globalData = { dataRows: [], headerRow: [], totalsRow: null, statusColIndex: -1, remainingColIndex: -1, numericCols: [] };
+
 window.addEventListener('error', function(e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
@@ -178,39 +227,35 @@ window.addEventListener('unhandledrejection', function(e) {
   showError('Ошибка загрузки: ' + (e.reason?.message || e.reason || 'неизвестная ошибка'));
 });
 
-// ТАЙМАУТ И ОБРЫВ ЗАПРОСА
 let abortController = null;
 const loadTimeout = setTimeout(() => {
   if (abortController) abortController.abort();
-  showError('Превышено время ожидания (10 сек). Проверьте интернет или наличие файла data.xlsx.');
+  showError('Превышено время ожидания (10 сек). Проверьте интернет.');
 }, 10000);
 
 function showError(msg) {
   clearTimeout(loadTimeout);
-  const loading = document.getElementById('loading');
-  if (loading) loading.hidden = true;
-  const content = document.getElementById('content');
-  if (content) content.hidden = true;
-  
+  document.getElementById('loading').hidden = true;
+  document.getElementById('content').hidden = true;
   const el = document.getElementById('error');
-  if (el) {
-    el.hidden = false;
-    el.innerHTML = `
-      <strong>Не удалось загрузить данные.</strong><br>
-      Проверьте: <br>
-      1. Файл <code>data.xlsx</code> загружен в репозиторий.<br>
-      2. Файл <code>xlsx.full.min.js</code> загружен в репозиторий.<br>
-      3. Вы обновили страницу.<br>
-      <hr style="border:0; border-top: 1px solid #fecaca; margin: 10px 0;">
-      <small style="opacity:.8;">Техническая информация: ${msg}</small>
-    `;
-  }
+  el.hidden = false;
+  el.innerHTML = `<strong>Не удалось загрузить данные.</strong><br>Проверьте файлы в репозитории.<br><small>${msg}</small>`;
 }
 
-const CONFIG = {
-  dataFile: 'data.xlsx',
-  title: 'Отчёт родительского комитета'
-};
+function switchTab(tabName) {
+  document.getElementById('tab-students').hidden = true;
+  document.getElementById('tab-stats').hidden = true;
+  
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  
+  if (tabName === 'students') {
+    document.getElementById('tab-students').hidden = false;
+    document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+  } else {
+    document.getElementById('tab-stats').hidden = false;
+    document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+  }
+}
 
 function cleanNumber(val) {
   if (typeof val === 'number') return val;
@@ -220,19 +265,11 @@ function cleanNumber(val) {
 }
 
 async function init() {
-  document.getElementById('pageTitle').textContent = CONFIG.title;
   abortController = new AbortController();
-
   try {
-    if (typeof XLSX === 'undefined') {
-      throw new Error('Библиотека xlsx.full.min.js не найдена в репозитории.');
-    }
-
-    const resp = await fetch(CONFIG.dataFile, { 
-      cache: 'no-store',
-      signal: abortController.signal 
-    });
+    if (typeof XLSX === 'undefined') throw new Error('Библиотека xlsx.full.min.js не найдена.');
     
+    const resp = await fetch('data.xlsx', { cache: 'no-store', signal: abortController.signal });
     if (!resp.ok) throw new Error('Файл не найден (HTTP ' + resp.status + ')');
 
     const lm = resp.headers.get('Last-Modified');
@@ -249,29 +286,23 @@ async function init() {
     if (!ws) throw new Error('В файле нет листов');
 
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, blankrows: true });
-    render(rows);
+    parseData(rows);
     
     clearTimeout(loadTimeout);
     document.getElementById('loading').hidden = true;
     document.getElementById('content').hidden = false;
-
   } catch (e) {
     if (e.name === 'AbortError') return; 
     showError(e.message);
   }
 }
 
-function render(rows) {
-  if (!rows || rows.length === 0) {
-    throw new Error('Файл пуст.');
-  }
+function parseData(rows) {
+  if (!rows || rows.length === 0) throw new Error('Файл пуст.');
 
   let headerRow = rows[0] || [];
-  
   let totalCols = headerRow.length;
-  while (totalCols > 0 && (!headerRow[totalCols - 1] || String(headerRow[totalCols - 1]).trim() === '')) {
-    totalCols--;
-  }
+  while (totalCols > 0 && (!headerRow[totalCols - 1] || String(headerRow[totalCols - 1]).trim() === '')) totalCols--;
   if (totalCols === 0) totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
 
   const dataRows = [];
@@ -280,32 +311,18 @@ function render(rows) {
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.length === 0) continue;
-
     const firstCol = String(r[0] || '').trim();
     const lowerRowText = r.join(' ').toLowerCase();
     
-    if (lowerRowText.includes('итог') || lowerRowText.includes('всего') || lowerRowText.includes('общий')) {
-      totalsRow = r;
-      continue;
-    }
-    if (firstCol === '' && r.some(c => typeof c === 'number')) {
-      totalsRow = r;
-      continue;
-    }
-
-    if (firstCol !== '' && /[a-zA-Zа-яА-Я]/.test(firstCol)) {
-      dataRows.push(r);
-    }
+    if (lowerRowText.includes('итог') || lowerRowText.includes('всего') || lowerRowText.includes('общий')) { totalsRow = r; continue; }
+    if (firstCol === '' && r.some(c => typeof c === 'number')) { totalsRow = r; continue; }
+    if (firstCol !== '' && /[a-zA-Zа-яА-Я]/.test(firstCol)) { dataRows.push(r); }
   }
 
-  if (dataRows.length === 0) {
-    throw new Error('Не найдено строк с именами.');
-  }
+  if (dataRows.length === 0) throw new Error('Не найдено строк с именами.');
 
   const numericCols = [];
-  for (let c = 1; c < totalCols; c++) { 
-    if (isNumericColumn(dataRows, c)) numericCols.push(c);
-  }
+  for (let c = 1; c < totalCols; c++) { if (isNumericColumn(dataRows, c)) numericCols.push(c); }
   
   let statusColIndex = -1;
   let remainingColIndex = -1;
@@ -315,17 +332,17 @@ function render(rows) {
     if (title.includes('остаток') || title.includes('долг')) remainingColIndex = c;
   }
 
-  renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex, remainingColIndex);
-  
-  const searchInput = document.getElementById('search');
-  searchInput.addEventListener('input', filterRows);
-  
+  globalData = { dataRows, headerRow, totalsRow, statusColIndex, remainingColIndex, numericCols, totalCols };
+
+  renderTable();
+  renderStats();
+
+  document.getElementById('search').addEventListener('input', filterRows);
   filterRows();
 }
 
 function isNumericColumn(rows, colIndex) {
-  let numCount = 0;
-  let validCount = 0;
+  let numCount = 0, validCount = 0;
   for (const row of rows) {
     const val = row[colIndex];
     if (val === '' || val == null) continue;
@@ -335,7 +352,8 @@ function isNumericColumn(rows, colIndex) {
   return validCount > 0 && (numCount / validCount) >= 0.3;
 }
 
-function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex, remainingColIndex) {
+function renderTable() {
+  const { headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex, remainingColIndex } = globalData;
   const theadMain = document.getElementById('tableHead');
   const theadTotals = document.getElementById('tableHeadTotals');
   const tbody = document.getElementById('tableBody');
@@ -374,13 +392,9 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     for (let c = 1; c < totalCols; c++) {
       if (c === statusColIndex || c === remainingColIndex) continue;
       if (!numericSet.has(c)) continue;
-
       const num = cleanNumber(row[c]);
-      if (isNaN(num) || Math.abs(num) < 0.01) {
-        isRowUnpaid = true;
-      }
+      if (isNaN(num) || Math.abs(num) < 0.01) isRowUnpaid = true;
     }
-
     if (isRowUnpaid) tr.classList.add('row-unpaid');
 
     for (let c = 0; c < totalCols; c++) {
@@ -396,12 +410,8 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
         if (Math.abs(num) < 0.01) {
           td.textContent = '—';
           td.classList.add('zero');
-          
-          if (c === statusColIndex) {
-            td.classList.add('unpaid'); 
-          } else if (c !== remainingColIndex) {
-            td.classList.add('cell-unpaid');
-          }
+          if (c === statusColIndex) td.classList.add('unpaid'); 
+          else if (c !== remainingColIndex) td.classList.add('cell-unpaid');
         } else {
           td.textContent = formatNumber(num);
           if (num < 0) td.classList.add('negative');
@@ -416,6 +426,97 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     }
     tbody.appendChild(tr);
   });
+}
+
+function renderStats() {
+  const { headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex, remainingColIndex } = globalData;
+  const finalTotals = totalsRow || computeTotals(dataRows, totalCols);
+  const studentsCount = dataRows.length;
+
+  // --- 1. СТАТУС ОПЛАТЫ ---
+  let fullyPaid = 0, partiallyPaid = 0, notPaid = 0;
+  
+  dataRows.forEach(row => {
+    const paidAmount = cleanNumber(row[statusColIndex]);
+    let hasDebt = false;
+    
+    // Проверяем, есть ли долги по расходам
+    for (let c = 1; c < totalCols; c++) {
+      if (c === statusColIndex || c === remainingColIndex) continue;
+      if (!numericCols.includes(c)) continue;
+      const val = cleanNumber(row[c]);
+      if (isNaN(val) || Math.abs(val) < 0.01) hasDebt = true;
+    }
+
+    if (isNaN(paidAmount) || paidAmount === 0) {
+      notPaid++;
+    } else if (hasDebt) {
+      partiallyPaid++;
+    } else {
+      fullyPaid++;
+    }
+  });
+
+  const pStatsEl = document.getElementById('paymentStats');
+  pStatsEl.innerHTML = `
+    <div class="progress-item">
+      <span>Сдали полностью</span>
+      <div class="progress-bar-bg"><div class="progress-bar-fill fill-green" style="width: ${(fullyPaid/studentsCount)*100}%"></div></div>
+      <strong>${fullyPaid} чел.</strong>
+    </div>
+    <div class="progress-item">
+      <span>Сдали частично</span>
+      <div class="progress-bar-bg"><div class="progress-bar-fill fill-yellow" style="width: ${(partiallyPaid/studentsCount)*100}%"></div></div>
+      <strong>${partiallyPaid} чел.</strong>
+    </div>
+    <div class="progress-item">
+      <span>Не сдавали</span>
+      <div class="progress-bar-bg"><div class="progress-bar-fill fill-red" style="width: ${(notPaid/studentsCount)*100}%"></div></div>
+      <strong>${notPaid} чел.</strong>
+    </div>
+  `;
+
+  // --- 2. ЦЕНА НА 1 РЕБЕНКА ---
+  const costEl = document.getElementById('costPerChild');
+  costEl.innerHTML = '';
+  
+  let hasExpenses = false;
+  numericCols.forEach(c => {
+    if (c === statusColIndex || c === remainingColIndex) return;
+    const totalAmount = typeof finalTotals[c] === 'number' ? finalTotals[c] : 0;
+    if (totalAmount > 0) {
+      hasExpenses = true;
+      const perChild = totalAmount / studentsCount;
+      const name = headerRow[c] || `Колонка ${c+1}`;
+      
+      const div = document.createElement('div');
+      div.className = 'price-item';
+      div.innerHTML = `<span>${name}</span> <span>~ ${formatNumber(perChild)} ₽</span>`;
+      costEl.appendChild(div);
+    }
+  });
+
+  if (!hasExpenses) {
+    costEl.innerHTML = '<div style="color:var(--muted); font-size:14px;">Расходов пока нет</div>';
+  }
+
+  // --- 3. ОСТАТОК НА 1 РЕБЕНКА ---
+  let totalRemaining = 0;
+  if (remainingColIndex !== -1 && typeof finalTotals[remainingColIndex] === 'number') {
+    totalRemaining = finalTotals[remainingColIndex];
+  } else {
+    // Если столбца "Остаток" нет, считаем по формуле: Собрано - Потрачено
+    const collected = typeof finalTotals[statusColIndex] === 'number' ? finalTotals[statusColIndex] : 0;
+    let spent = 0;
+    numericCols.forEach(c => {
+      if (c === statusColIndex) return;
+      spent += (typeof finalTotals[c] === 'number' ? finalTotals[c] : 0);
+    });
+    totalRemaining = collected - spent;
+  }
+
+  const reservePerChild = totalRemaining / studentsCount;
+  document.getElementById('reservePerChild').textContent = formatNumber(reservePerChild) + ' ₽';
 }
 
 function computeTotals(dataRows, totalCols) {
@@ -442,17 +543,11 @@ function filterRows() {
   }
 
   let found = 0;
-  
   rows.forEach(tr => {
     const nameCell = tr.cells[0];
     const isMatch = nameCell && nameCell.textContent.toLowerCase().includes(q);
-    
-    if (isMatch) {
-      tr.classList.remove('hidden');
-      found++;
-    } else {
-      tr.classList.add('hidden');
-    }
+    if (isMatch) { tr.classList.remove('hidden'); found++; }
+    else { tr.classList.add('hidden'); }
   });
   
   document.getElementById('rowCount').textContent = found > 0 ? `Найдено: ${found}` : 'Не найдено';
