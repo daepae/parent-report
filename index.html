@@ -419,7 +419,7 @@ function filterRows() {
 function updateRowCount() {
   const rows = document.querySelectorAll('#tableBody tr');
   const visible = [...rows].filter(r => !r.classList.contains('hidden')).length;
-  document.getElementById('rowCount').textContent = visible === rows.length ? `${rows.length} записей` : `${visible} из ${rows.length}`;
+  document.getElementById('rowCount').textContent = visible === rows.length ? `${rows.length} человек` : `${visible} из ${rows.length}`;
 }
 
 function formatNumber(v) {
