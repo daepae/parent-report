@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Отчёт родительского комитета</title>
-<!-- ТЕПЕРЬ БИБЛИОТЕКА ЗАГРУЖАЕТСЯ ИЗ ВАШЕГО ЖЕ РЕПОЗИТОРИЯ -->
+<!-- Локальная библиотека (должна лежать в репозитории) -->
 <script src="xlsx.full.min.js"></script>
 <style>
   :root {
@@ -37,8 +37,13 @@
   }
   .toolbar {
     padding: 16px 20px; border-bottom: 1px solid var(--border-soft);
-    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+    display: flex; flex-direction: column; gap: 8px;
   }
+  
+  .search-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  
   .search-wrap { position: relative; flex: 1; min-width: 250px; max-width: 500px; }
   .search-wrap svg {
     position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
@@ -55,6 +60,10 @@
     box-shadow: 0 0 0 3px rgba(99,102,241,.1);
   }
   .row-count { font-size: 13px; color: var(--muted); margin-left: auto; }
+  
+  .hint {
+    font-size: 13px; color: var(--accent); font-weight: 500; margin-left: 36px;
+  }
 
   .table-wrapper { overflow-x: auto; width: 100%; max-height: 80vh; }
   
@@ -114,9 +123,9 @@
   @media (max-width: 768px) {
     .container { padding: 16px 12px; }
     header { flex-direction: column; }
-    .toolbar { flex-direction: column; align-items: stretch; }
-    .row-count { margin: 8px 0 0; text-align: right; }
+    .row-count { margin: 8px 0 0; text-align: right; width: 100%; }
     #tableHeadTotals th { font-size: 13px; padding: 8px 12px; }
+    .hint { margin-left: 0; }
   }
 </style>
 </head>
@@ -139,14 +148,17 @@
   <div id="content" hidden>
     <section class="table-section">
       <div class="toolbar">
-        <div class="search-wrap">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="7"></circle>
-            <path d="m21 21-4.3-4.3"></path>
-          </svg>
-          <input type="search" id="search" placeholder="Найти по имени или сумме…" autocomplete="off">
+        <div class="search-row">
+          <div class="search-wrap">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="m21 21-4.3-4.3"></path>
+            </svg>
+            <input type="search" id="search" placeholder="Введите фамилию ребенка..." autocomplete="off">
+          </div>
+          <span class="row-count" id="rowCount">Список скрыт</span>
         </div>
-        <span class="row-count" id="rowCount"></span>
+        <div class="hint" id="searchHint">Введите минимум 2 буквы фамилии или имени, чтобы увидеть данные ребенка.</div>
       </div>
       <div class="table-wrapper">
         <table id="dataTable">
@@ -162,6 +174,7 @@
 </div>
 
 <script>
+// ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК ОШИБОК
 window.addEventListener('error', function(e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
@@ -169,9 +182,12 @@ window.addEventListener('unhandledrejection', function(e) {
   showError('Ошибка загрузки: ' + (e.reason?.message || e.reason || 'неизвестная ошибка'));
 });
 
+// ТАЙМАУТ И ОБРЫВ ЗАПРОСА
+let abortController = null;
 const loadTimeout = setTimeout(() => {
-  showError('Превышено время ожидания. Файл data.xlsx не найден или GitHub Pages не отвечает.');
-}, 10000); // Увеличил таймаут до 10 сек на случай медленного мобильного интернета
+  if (abortController) abortController.abort();
+  showError('Превышено время ожидания (10 сек). Проверьте интернет или наличие файла data.xlsx.');
+}, 10000);
 
 function showError(msg) {
   clearTimeout(loadTimeout);
@@ -200,22 +216,29 @@ const CONFIG = {
   title: 'Отчёт родительского комитета'
 };
 
+// Ультра-безопасная конвертация в число (убирает пробелы, запятые, невидимые символы)
 function cleanNumber(val) {
   if (typeof val === 'number') return val;
   if (val === null || val === undefined || val === '') return NaN;
-  const str = String(val).replace(/\s/g, '').replace(',', '.');
+  // Убираем все виды пробелов (включая неразрывный \u00A0) и меняем запятую на точку
+  const str = String(val).replace(/[\s\u00A0]/g, '').replace(',', '.');
   return parseFloat(str);
 }
 
 async function init() {
   document.getElementById('pageTitle').textContent = CONFIG.title;
+  abortController = new AbortController();
 
   try {
     if (typeof XLSX === 'undefined') {
-      throw new Error('Файл xlsx.full.min.js не найден рядом с index.html.');
+      throw new Error('Библиотека xlsx.full.min.js не найдена в репозитории.');
     }
 
-    const resp = await fetch(CONFIG.dataFile, { cache: 'no-store' });
+    const resp = await fetch(CONFIG.dataFile, { 
+      cache: 'no-store',
+      signal: abortController.signal 
+    });
+    
     if (!resp.ok) throw new Error('Файл не найден (HTTP ' + resp.status + ')');
 
     const lm = resp.headers.get('Last-Modified');
@@ -239,24 +262,24 @@ async function init() {
     document.getElementById('content').hidden = false;
 
   } catch (e) {
+    if (e.name === 'AbortError') return; // Игнорируем ошибку, если это сработал наш таймер
     showError(e.message);
   }
 }
 
 function render(rows) {
   if (!rows || rows.length === 0) {
-    throw new Error('Файл пуст или не содержит данных.');
+    throw new Error('Файл пуст.');
   }
 
   let headerRow = rows[0] || [];
   
+  // Обрезаем столбцы, если в заголовке пусто
   let totalCols = headerRow.length;
   while (totalCols > 0 && (!headerRow[totalCols - 1] || String(headerRow[totalCols - 1]).trim() === '')) {
     totalCols--;
   }
-  if (totalCols === 0) {
-    totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
-  }
+  if (totalCols === 0) totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
 
   const dataRows = [];
   let totalsRow = null;
@@ -266,25 +289,35 @@ function render(rows) {
     if (!r || r.length === 0) continue;
 
     const firstCol = String(r[0] || '').trim();
-    const hasLetters = /[a-zA-Zа-яА-Я]/.test(firstCol);
-    const hasNumbers = r.some(cell => typeof cell === 'number' && !isNaN(cell));
+    const lowerRowText = r.join(' ').toLowerCase();
     
-    if (firstCol === '' && hasNumbers) {
+    // Надежный поиск строки Итогов (по словам или по пустой первой ячейке с числами)
+    if (lowerRowText.includes('итог') || lowerRowText.includes('всего') || lowerRowText.includes('общий')) {
       totalsRow = r;
-    } else if (hasLetters) {
+      continue;
+    }
+    if (firstCol === '' && r.some(c => typeof c === 'number')) {
+      totalsRow = r;
+      continue;
+    }
+
+    // Если есть текст в первой колонке — это ученик
+    if (firstCol !== '' && /[a-zA-Zа-яА-Я]/.test(firstCol)) {
       dataRows.push(r);
     }
   }
 
   if (dataRows.length === 0) {
-    throw new Error('Не найдено строк с именами. Убедитесь, что в столбце A есть ФИО.');
+    throw new Error('Не найдено строк с именами.');
   }
 
+  // Определяем числовые столбцы
   const numericCols = [];
   for (let c = 1; c < totalCols; c++) { 
     if (isNumericColumn(dataRows, c)) numericCols.push(c);
   }
   
+  // Ищем столбцы "Сдали" и "Остаток"
   let statusColIndex = -1;
   let remainingColIndex = -1;
   for (let c = 0; c < totalCols; c++) {
@@ -294,7 +327,12 @@ function render(rows) {
   }
 
   renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex, remainingColIndex);
-  document.getElementById('search').addEventListener('input', filterRows);
+  
+  const searchInput = document.getElementById('search');
+  searchInput.addEventListener('input', filterRows);
+  
+  // Изначально скрываем всех
+  filterRows();
 }
 
 function isNumericColumn(rows, colIndex) {
@@ -306,7 +344,8 @@ function isNumericColumn(rows, colIndex) {
     validCount++;
     if (!isNaN(cleanNumber(val))) numCount++;
   }
-  return validCount > 0 && (numCount / validCount) >= 0.5;
+  // Если хотя бы 30% заполненных ячеек — числа, считаем колонку числовой
+  return validCount > 0 && (numCount / validCount) >= 0.3;
 }
 
 function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex, remainingColIndex) {
@@ -342,7 +381,9 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
 
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
+    tr.classList.add('hidden'); 
     
+    // Логика долгов: проверяем только столбцы расходов
     let isRowUnpaid = false;
     for (let c = 1; c < totalCols; c++) {
       if (c === statusColIndex || c === remainingColIndex) continue;
@@ -389,8 +430,6 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     }
     tbody.appendChild(tr);
   });
-
-  updateRowCount();
 }
 
 function computeTotals(dataRows, totalCols) {
@@ -409,17 +448,32 @@ function computeTotals(dataRows, totalCols) {
 function filterRows() {
   const q = document.getElementById('search').value.trim().toLowerCase();
   const rows = document.querySelectorAll('#tableBody tr');
-  rows.forEach(tr => {
-    if (!q) { tr.classList.remove('hidden'); return; }
-    tr.classList.toggle('hidden', !tr.textContent.toLowerCase().includes(q));
-  });
-  updateRowCount();
-}
+  const hint = document.getElementById('searchHint');
+  
+  if (q.length < 2) {
+    rows.forEach(tr => tr.classList.add('hidden'));
+    hint.style.display = 'block';
+    document.getElementById('rowCount').textContent = 'Список скрыт';
+    return;
+  }
 
-function updateRowCount() {
-  const rows = document.querySelectorAll('#tableBody tr');
-  const visible = [...rows].filter(r => !r.classList.contains('hidden')).length;
-  document.getElementById('rowCount').textContent = visible === rows.length ? `${rows.length} человек` : `${visible} из ${rows.length}`;
+  hint.style.display = 'none';
+  let found = 0;
+  
+  rows.forEach(tr => {
+    // Ищем СТРОГО в первой ячейке (ФИО), чтобы не показывать всех подряд по цифрам
+    const nameCell = tr.cells[0];
+    const isMatch = nameCell && nameCell.textContent.toLowerCase().includes(q);
+    
+    if (isMatch) {
+      tr.classList.remove('hidden');
+      found++;
+    } else {
+      tr.classList.add('hidden');
+    }
+  });
+  
+  document.getElementById('rowCount').textContent = found > 0 ? `Найдено: ${found}` : 'Не найдено';
 }
 
 function formatNumber(v) {
