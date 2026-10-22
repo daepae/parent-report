@@ -76,6 +76,14 @@
 
   /* Дашборд */
   .dashboard-section { padding: 24px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); }
+  .kpi-label { font-size: 13px; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; letter-spacing: 0.5px;}
+  .kpi-value { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
+  .kpi-value.green { color: var(--success); }
+  .kpi-value.blue { color: var(--accent); }
+  .kpi-value.red { color: var(--danger); }
+
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
   .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; }
   .stat-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text); }
@@ -84,19 +92,17 @@
   .progress-item { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
   .progress-bar-bg { flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; margin: 0 12px; overflow: hidden;}
   .progress-bar-fill { height: 100%; border-radius: 4px; }
-  .fill-green { background: var(--success); }
-  .fill-yellow { background: #eab308; }
-  .fill-red { background: var(--danger); }
+  
+  /* Смягченные цвета */
+  .fill-green { background: #4ade80; }
+  .fill-yellow { background: #fcd34d; }
+  .fill-red { background: #f87171; }
 
   .price-list { display: flex; flex-direction: column; gap: 12px; }
   .price-item { display: flex; justify-content: space-between; font-size: 14px; padding-bottom: 8px; border-bottom: 1px dashed var(--border); }
   .price-item:last-child { border-bottom: none; padding-bottom: 0; }
   .price-item span:first-child { color: var(--muted); }
   .price-item span:last-child { font-weight: 600; color: var(--text); }
-
-  .reserve-block { text-align: center; padding: 10px 0; }
-  .reserve-value { font-size: 36px; font-weight: 800; color: var(--accent); letter-spacing: -1px; margin-bottom: 8px; }
-  .reserve-desc { font-size: 14px; color: var(--muted); }
 
   .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--muted); gap: 16px; }
   .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
@@ -165,23 +171,37 @@
 
     <div id="tab-stats" hidden>
       <section class="dashboard-section">
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-title">Статус оплаты</div>
-            <div class="progress-list" id="paymentStats"></div>
+        
+        <!-- KPI Блок -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Собрано всего</div>
+            <div class="kpi-value green" id="kpi-collected">0 ₽</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-title">Стоимость на 1 ребенка</div>
-            <div class="price-list" id="costPerChild"></div>
+          <div class="kpi-card">
+            <div class="kpi-label">Потрачено всего</div>
+            <div class="kpi-value blue" id="kpi-spent">0 ₽</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-title">Остаток в кассе</div>
-            <div class="reserve-block">
-              <div class="reserve-value" id="reservePerChild">0 ₽</div>
-              <div class="reserve-desc">на каждого ученика (если разделить оставшуюся сумму поровну)</div>
-            </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Остаток в кассе</div>
+            <div class="kpi-value" id="kpi-balance">0 ₽</div>
           </div>
         </div>
+
+        <div class="stats-grid">
+          <!-- Блок 1: Дисциплина (Более мягкие формулировки) -->
+          <div class="stat-card">
+            <div class="stat-title">Статус сборов</div>
+            <div class="progress-list" id="paymentStats"></div>
+          </div>
+
+          <!-- Блок 2: Куда ушли деньги -->
+          <div class="stat-card">
+            <div class="stat-title">На что потрачены деньги</div>
+            <div class="price-list" id="expensesList"></div>
+          </div>
+        </div>
+
       </section>
     </div>
   </div>
@@ -263,11 +283,8 @@ async function init() {
     document.getElementById('content').hidden = false;
   } catch (e) {
     if (e.name === 'AbortError') return; 
-    if (e.message === 'Failed to fetch') {
-      showError('Нет подключения к интернету. Проверьте сеть.');
-    } else {
-      showError(e.message);
-    }
+    if (e.message === 'Failed to fetch') showError('Нет подключения к интернету. Проверьте сеть.');
+    else showError(e.message);
   }
 }
 
@@ -287,29 +304,15 @@ function parseData(rows) {
     if (!r || r.length === 0) continue;
     const firstCol = String(r[0] || '').trim().toLowerCase();
     
-    // Жестко отсекаем строку итогов
-    if (firstCol.includes('итог') || firstCol.includes('общий') || firstCol.includes('всего')) {
-      totalsRow = r;
-      continue;
-    }
-    // Если первая ячейка пустая, но есть числа — это тоже итоги
-    if (firstCol === '' && r.some(c => typeof c === 'number')) {
-      totalsRow = r;
-      continue;
-    }
-    
-    // Если есть текст — это ученик
-    if (firstCol !== '' && /[a-zA-Zа-яА-Я]/.test(firstCol)) {
-      dataRows.push(r);
-    }
+    if (firstCol.includes('итог') || firstCol.includes('общий') || firstCol.includes('всего')) { totalsRow = r; continue; }
+    if (firstCol === '' && r.some(c => typeof c === 'number')) { totalsRow = r; continue; }
+    if (firstCol !== '' && /[a-zA-Zа-яА-Я]/.test(firstCol)) { dataRows.push(r); }
   }
 
   if (dataRows.length === 0) throw new Error('Не найдено строк с именами.');
 
   const numericCols = [];
-  for (let c = 1; c < totalCols; c++) { 
-    if (isNumericColumn(dataRows, c)) numericCols.push(c); 
-  }
+  for (let c = 1; c < totalCols; c++) { if (isNumericColumn(dataRows, c)) numericCols.push(c); }
 
   globalData = { dataRows, headerRow, totalsRow, numericCols, totalCols };
 
@@ -335,7 +338,6 @@ function getFinalTotals(dataRows, totalsRow, totalCols) {
   const computed = computeTotals(dataRows, totalCols);
   const final = [];
   for (let c = 0; c < totalCols; c++) {
-    // Если в Excel в строке итогов есть число — берем его. Иначе — считаем сами.
     if (totalsRow && typeof totalsRow[c] === 'number' && !isNaN(totalsRow[c])) {
       final[c] = totalsRow[c];
     } else {
@@ -382,7 +384,7 @@ function renderTable() {
     tr.classList.add('hidden'); 
     
     let isRowUnpaid = false;
-    for (let c = 3; c < totalCols; c++) { // Начинаем с 3 (после ФИО, Сдали, Остаток)
+    for (let c = 3; c < totalCols; c++) { 
       if (!numericSet.has(c)) continue;
       const num = cleanNumber(row[c]);
       if (isNaN(num) || Math.abs(num) < 0.01) isRowUnpaid = true;
@@ -402,12 +404,12 @@ function renderTable() {
         if (Math.abs(num) < 0.01) {
           td.textContent = '—';
           td.classList.add('zero');
-          if (c === 1) td.classList.add('unpaid'); // Столбец "Сдали"
-          else if (c > 2) td.classList.add('cell-unpaid'); // Столбцы расходов
+          if (c === 1) td.classList.add('unpaid'); 
+          else if (c > 2) td.classList.add('cell-unpaid'); 
         } else {
           td.textContent = formatNumber(num);
           if (num < 0) td.classList.add('negative');
-          if (c === 1) td.classList.add('paid'); // Столбец "Сдали"
+          if (c === 1) td.classList.add('paid'); 
         }
       } else {
         const s = val === '' || val == null ? '—' : String(val);
@@ -425,11 +427,28 @@ function renderStats() {
   const finalTotals = getFinalTotals(dataRows, totalsRow, totalCols);
   const studentsCount = dataRows.length;
 
-  // Индекс 1 - это "Сдали", индекс 2 - "Остаток"
-  const statusColIndex = 1;
-  const remainingColIndex = 2;
+  const statusColIndex = 1; 
+  const remainingColIndex = 2; 
 
-  // --- 1. СТАТУС ОПЛАТЫ ---
+  // --- 1. KPI БЛОК ---
+  const collected = typeof finalTotals[statusColIndex] === 'number' ? finalTotals[statusColIndex] : 0;
+  
+  let spent = 0;
+  numericCols.forEach(c => {
+    if (c < 3) return;
+    spent += (typeof finalTotals[c] === 'number' ? finalTotals[c] : 0);
+  });
+
+  let balance = typeof finalTotals[remainingColIndex] === 'number' ? finalTotals[remainingColIndex] : (collected - spent);
+
+  document.getElementById('kpi-collected').textContent = formatNumber(collected) + ' ₽';
+  document.getElementById('kpi-spent').textContent = formatNumber(spent) + ' ₽';
+  
+  const balanceEl = document.getElementById('kpi-balance');
+  balanceEl.textContent = formatNumber(balance) + ' ₽';
+  if (balance < 0) balanceEl.classList.add('red'); else balanceEl.classList.remove('red');
+
+  // --- 2. СТАТУС СБОРОВ (Мягкие формулировки) ---
   const pStatsEl = document.getElementById('paymentStats');
   let fullyPaid = 0, partiallyPaid = 0, notPaid = 0;
 
@@ -437,7 +456,7 @@ function renderStats() {
     const paidAmount = cleanNumber(row[statusColIndex]);
     let hasDebt = false;
     
-    for (let c = 3; c < totalCols; c++) { // Расходы начинаются с индекса 3
+    for (let c = 3; c < totalCols; c++) {
       if (!numericCols.includes(c)) continue;
       const val = cleanNumber(row[c]);
       if (isNaN(val) || Math.abs(val) < 0.01) hasDebt = true;
@@ -454,7 +473,7 @@ function renderStats() {
 
   pStatsEl.innerHTML = `
     <div class="progress-item">
-      <span>Сдали полностью</span>
+      <span>Сдали всё</span>
       <div class="progress-bar-bg"><div class="progress-bar-fill fill-green" style="width: ${(fullyPaid/studentsCount)*100}%"></div></div>
       <strong>${fullyPaid} чел.</strong>
     </div>
@@ -464,53 +483,34 @@ function renderStats() {
       <strong>${partiallyPaid} чел.</strong>
     </div>
     <div class="progress-item">
-      <span>Не сдавали</span>
+      <span>Пока не сдавали</span>
       <div class="progress-bar-bg"><div class="progress-bar-fill fill-red" style="width: ${(notPaid/studentsCount)*100}%"></div></div>
       <strong>${notPaid} чел.</strong>
     </div>
   `;
 
-  // --- 2. ЦЕНА НА 1 РЕБЕНКА ---
-  const costEl = document.getElementById('costPerChild');
-  costEl.innerHTML = '';
+  // --- 3. НА ЧТО ПОТРАЧЕНЫ ДЕНЬГИ ---
+  const expensesEl = document.getElementById('expensesList');
+  expensesEl.innerHTML = '';
   
   let hasExpenses = false;
   numericCols.forEach(c => {
-    if (c < 3) return; // Пропускаем ФИО, Сдали и Остаток
+    if (c < 3) return;
     const totalAmount = typeof finalTotals[c] === 'number' ? finalTotals[c] : 0;
     if (totalAmount > 0) {
       hasExpenses = true;
-      const perChild = totalAmount / studentsCount;
       const name = headerRow[c] || `Колонка ${c+1}`;
       
       const div = document.createElement('div');
       div.className = 'price-item';
-      div.innerHTML = `<span>${name}</span> <span>~ ${formatNumber(perChild)} ₽</span>`;
-      costEl.appendChild(div);
+      div.innerHTML = `<span>${name}</span> <span>${formatNumber(totalAmount)} ₽</span>`;
+      expensesEl.appendChild(div);
     }
   });
 
   if (!hasExpenses) {
-    costEl.innerHTML = '<div style="color:var(--muted); font-size:14px;">Расходов пока нет</div>';
+    expensesEl.innerHTML = '<div style="color:var(--muted); font-size:14px;">Расходов пока нет</div>';
   }
-
-  // --- 3. ОСТАТОК НА 1 РЕБЕНКА ---
-  let totalRemaining = 0;
-  if (typeof finalTotals[remainingColIndex] === 'number') {
-    totalRemaining = finalTotals[remainingColIndex];
-  } else {
-    // Если столбца нет, считаем вручную
-    const collected = typeof finalTotals[statusColIndex] === 'number' ? finalTotals[statusColIndex] : 0;
-    let spent = 0;
-    numericCols.forEach(c => {
-      if (c < 3) return;
-      spent += (typeof finalTotals[c] === 'number' ? finalTotals[c] : 0);
-    });
-    totalRemaining = collected - spent;
-  }
-
-  const reservePerChild = totalRemaining / studentsCount;
-  document.getElementById('reservePerChild').textContent = formatNumber(reservePerChild) + ' ₽';
 }
 
 function computeTotals(dataRows, totalCols) {
