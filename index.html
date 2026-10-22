@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Отчёт родительского комитета</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #f8fafc; --card: #fff; --text: #0f172a; --muted: #64748b;
+    --border: #e2e8f0; --border-soft: #f1f5f9;
+    --accent: #6366f1; --success: #16a34a; --danger: #dc2626;
+    --radius: 12px; --radius-sm: 8px;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,.04);
+    --shadow: 0 1px 3px rgba(15,23,42,.06), 0 1px 2px -1px rgba(15,23,42,.06);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg); color: var(--text);
+    font-size: 14px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+
+  h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; letter-spacing: -.01em; }
+  .subtitle { color: var(--muted); font-size: 13px; margin: 0; }
+  header { margin-bottom: 24px; }
+
+  /* Сводные карточки */
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px; margin-bottom: 24px;
+  }
+  .card {
+    background: var(--card); border-radius: var(--radius);
+    padding: 16px 18px; border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
+  }
+  .card::before {
+    content: ''; position: absolute; top: 0; left: 0; bottom: 0;
+    width: 3px; background: var(--accent);
+  }
+  .card.success::before { background: var(--success); }
+  .card.danger::before  { background: var(--danger); }
+  .card-label {
+    font-size: 12px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em;
+    font-weight: 500; margin-bottom: 6px;
+  }
+  .card-value { font-size: 24px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
+  .card-value.success { color: var(--success); }
+  .card-value.danger  { color: var(--danger); }
+
+  /* Таблица */
+  .table-section {
+    background: var(--card); border-radius: var(--radius);
+    border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .toolbar {
+    padding: 16px 18px; border-bottom: 1px solid var(--border-soft);
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  .search-wrap { position: relative; flex: 1; min-width: 200px; max-width: 400px; }
+  .search-wrap svg {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; color: var(--muted); pointer-events: none;
+  }
+  .search-wrap input {
+    width: 100%; padding: 9px 12px 9px 36px; font-size: 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg); color: var(--text); font-family: inherit;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+  .search-wrap input:focus {
+    outline: none; border-color: var(--accent); background: var(--card);
+    box-shadow: 0 0 0 3px rgba(99,102,241,.1);
+  }
+  .row-count { font-size: 13px; color: var(--muted); margin-left: auto; }
+
+  .table-wrapper { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  thead { position: sticky; top: 0; z-index: 1; }
+  th {
+    background: #f8fafc; color: var(--muted); font-weight: 600;
+    text-align: left; padding: 12px 16px; font-size: 12px;
+    text-transform: uppercase; letter-spacing: .04em;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+    cursor: pointer; user-select: none; transition: background .15s, color .15s;
+  }
+  th:hover { background: #f1f5f9; color: var(--text); }
+  th .sort-icon { display: inline-block; margin-left: 4px; opacity: .4; font-size: 10px; }
+  th.sorted .sort-icon { opacity: 1; color: var(--accent); }
+
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+  tbody tr { transition: background .1s; }
+  tbody tr:hover { background: #f8fafc; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.hidden { display: none; }
+
+  th.num, td.num { text-align: right; }
+  td.num { font-variant-numeric: tabular-nums; }
+  td.zero { color: #cbd5e1; }
+  td.negative { color: var(--danger); }
+  td.paid { color: var(--success); font-weight: 600; }
+  td.unpaid { color: var(--danger); font-weight: 600; }
+
+  tbody tr.totals { background: #f8fafc; font-weight: 600; }
+  tbody tr.totals td { border-top: 2px solid var(--border); border-bottom: none; color: var(--text); }
+
+  .loading {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 80px 20px; color: var(--muted); gap: 16px;
+  }
+  .spinner {
+    width: 32px; height: 32px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error {
+    background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+    padding: 16px 20px; border-radius: var(--radius);
+    font-size: 14px; line-height: 1.6;
+  }
+  .error code { background: rgba(153,27,27,.08); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+
+  @media (max-width: 640px) {
+    .container { padding: 16px 12px 32px; }
+    h1 { font-size: 18px; }
+    .card-value { font-size: 20px; }
+    .card { padding: 14px 16px; }
+    th, td { padding: 10px 12px; font-size: 13px; }
+    th { font-size: 11px; }
+  }
+  @media print {
+    body { background: #fff; }
+    .toolbar { display: none; }
+    .table-section, .card { box-shadow: none; border: 1px solid #ccc; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1 id="pageTitle">Отчёт родительского комитета</h1>
+    <p class="subtitle" id="lastUpdated"></p>
+  </header>
+
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Загружаем данные…</p>
+  </div>
+
+  <div id="error" class="error" hidden></div>
+
+  <div id="content" hidden>
+    <section class="summary" id="summary"></section>
+    <section class="table-section">
+      <div class="toolbar">
+        <div class="search-wrap">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m21 21-4.3-4.3"></path>
+          </svg>
+          <input type="search" id="search" placeholder="Найти по имени или сумме…" autocomplete="off">
+        </div>
+        <span class="row-count" id="rowCount"></span>
+      </div>
+      <div class="table-wrapper">
+        <table id="dataTable">
+          <thead><tr id="tableHead"></tr></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+/* ================== НАСТРОЙКИ ==================
+   Если структура таблицы изменится — правьте только этот блок.
+   Все индексы столбцов 0-based (A=0, B=1, C=2, …).
+   ================================================ */
+const CONFIG = {
+  dataFile: 'data.xlsx',
+  title: 'Отчёт родительского комитета',
+
+  headerRow: 1,       // строка с заголовками
+  dataStartRow: 4,    // первая строка с данными
+
+  // Скрытые столбцы. По умолчанию:
+  // 1 = B (ФИО родителя), 3 = D (телефон), 10 = K (пустой)
+  // Если у вас B — это ребёнок, а C — родитель, поменяйте на [2, 3, 10].
+  hiddenColumns: [1, 3, 10],
+
+  // Столбцы с денежными значениями: E=4, F=5, G=6, H=7, I=8, J=9
+  currencyColumns: [4, 5, 6, 7, 8, 9],
+
+  // Столбец «взнос» — подсвечиваем зелёным/красным
+  statusColumn: 4,
+
+  // Сводные карточки сверху
+  summaryCards: [
+    { label: 'Собрано',   column: 4, tone: 'success' },
+    { label: 'Потрачено', compute: 'expenses', tone: 'danger' },
+    { label: 'Остаток',   column: 5, tone: 'neutral' },
+  ],
+  expenseColumns: [6, 7, 8, 9], // столбцы, сумма которых = «потрачено»
+
+  // Если заголовки в исходнике непонятные — переопределите здесь:
+  // headerOverrides: { 6: 'Подарки', 7: 'Экскурсии' },
+  headerOverrides: {},
+};
+
+/* ================== ЗАГРУЗКА ================== */
+async function init() {
+  document.getElementById('pageTitle').textContent = CONFIG.title;
+
+  try {
+    const resp = await fetch(CONFIG.dataFile, { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    const lm = resp.headers.get('Last-Modified');
+    if (lm) {
+      const d = new Date(lm);
+      document.getElementById('lastUpdated').textContent =
+        'Обновлено: ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
+
+    const buf = await resp.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error('В файле нет листов');
+
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, blankrows: true });
+    render(rows);
+  } catch (e) {
+    showError(e);
+  }
+}
+
+function showError(e) {
+  document.getElementById('loading').hidden = true;
+  const el = document.getElementById('error');
+  el.hidden = false;
+  el.innerHTML = `
+    <strong>Не удалось загрузить данные.</strong><br>
+    Убедитесь, что файл <code>${CONFIG.dataFile}</code> загружен в репозиторий рядом с этой страницей.
+    <br><small style="opacity:.7;margin-top:8px;display:inline-block;">Техническая информация: ${e.message}</small>
+  `;
+}
+
+/* ================== РЕНДЕР ================== */
+function render(rows) {
+  const headerRow = rows[CONFIG.headerRow - 1] || [];
+  const totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
+
+  const dataRows = [];
+  let totalsRow = null;
+
+  for (let i = CONFIG.dataStartRow - 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const a = r[0];
+    const b = String(r[1] || '').toLowerCase();
+
+    if (b.includes('итог')) { totalsRow = r; continue; }
+    if (typeof a === 'number' && a > 0) dataRows.push(r);
+  }
+
+  if (dataRows.length === 0) {
+    document.getElementById('loading').hidden = true;
+    showError(new Error('Не найдено строк с данными. Проверьте структуру файла.'));
+    return;
+  }
+
+  if (!totalsRow) totalsRow = computeTotals(dataRows, totalCols);
+
+  const hidden = new Set(CONFIG.hiddenColumns);
+  const visibleCols = [];
+  for (let c = 0; c < totalCols; c++) if (!hidden.has(c)) visibleCols.push(c);
+
+  renderTable(headerRow, dataRows, totalsRow, visibleCols);
+  renderSummary(totalsRow);
+
+  document.getElementById('loading').hidden = true;
+  document.getElementById('content').hidden = false;
+  document.getElementById('search').addEventListener('input', filterRows);
+}
+
+function computeTotals(dataRows, totalCols) {
+  const totals = [];
+  for (let c = 0; c < totalCols; c++) {
+    let sum = 0, allNumeric = true, hasValue = false;
+    dataRows.forEach(r => {
+      const v = r[c];
+      if (typeof v === 'number') { sum += v; hasValue = true; }
+      else if (v !== '' && v != null) allNumeric = false;
+    });
+    totals[c] = (allNumeric && hasValue) ? sum : '';
+  }
+  return totals;
+}
+
+function renderTable(headerRow, dataRows, totalsRow, visibleCols) {
+  const thead = document.getElementById('tableHead');
+  const tbody = document.getElementById('tableBody');
+  const currencySet = new Set(CONFIG.currencyColumns);
+  const overrides = CONFIG.headerOverrides || {};
+
+  thead.innerHTML = '';
+  visibleCols.forEach(c => {
+    const th = document.createElement('th');
+    let title = overrides[c] != null ? overrides[c] : (headerRow[c] || '');
+    if (c === 0 && !title) title = '№';
+    th.textContent = title;
+    th.dataset.col = c;
+    th.dataset.type = currencySet.has(c) ? 'number' : 'string';
+    if (currencySet.has(c)) th.classList.add('num');
+
+    const icon = document.createElement('span');
+    icon.className = 'sort-icon'; icon.textContent = '↕';
+    th.appendChild(icon);
+    th.addEventListener('click', () => sortByColumn(c, th));
+    thead.appendChild(th);
+  });
+
+  tbody.innerHTML = '';
+  dataRows.forEach(row => {
+    const tr = document.createElement('tr');
+    visibleCols.forEach(c => {
+      const td = document.createElement('td');
+      const val = row[c];
+      const isCurrency = currencySet.has(c);
+
+      if (isCurrency) {
+        td.classList.add('num');
+        const num = typeof val === 'number' ? val : (parseFloat(val) || 0);
+
+        if (c === CONFIG.statusColumn) {
+          if (Math.abs(num) < 0.01) {
+            td.textContent = '—';
+            td.classList.add('unpaid');
+          } else {
+            td.textContent = formatNumber(num);
+            td.classList.add('paid');
+          }
+        } else if (Math.abs(num) < 0.01) {
+          td.textContent = '—';
+          td.classList.add('zero');
+        } else {
+          td.textContent = formatNumber(num);
+          if (num < 0) td.classList.add('negative');
+        }
+      } else {
+        const s = val === '' || val == null ? '—' : String(val);
+        td.textContent = s;
+        if (s === '—') td.classList.add('zero');
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  if (totalsRow) {
+    const tr = document.createElement('tr');
+    tr.className = 'totals';
+    visibleCols.forEach(c => {
+      const td = document.createElement('td');
+      const val = totalsRow[c];
+      if (currencySet.has(c) && typeof val === 'number') {
+        td.classList.add('num');
+        td.textContent = formatNumber(val);
+      } else {
+        td.textContent = val === '' || val == null ? '' : String(val);
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+
+  updateRowCount();
+}
+
+function renderSummary(totalsRow) {
+  const el = document.getElementById('summary');
+  el.innerHTML = '';
+  if (!totalsRow) return;
+
+  CONFIG.summaryCards.forEach(card => {
+    let value = 0;
+    if (typeof card.column === 'number') {
+      const v = totalsRow[card.column];
+      value = typeof v === 'number' ? v : 0;
+    } else if (card.compute === 'expenses') {
+      value = CONFIG.expenseColumns.reduce((s, c) => {
+        const v = totalsRow[c];
+        return s + (typeof v === 'number' ? v : 0);
+      }, 0);
+    }
+    const div = document.createElement('div');
+    div.className = 'card ' + (card.tone || '');
+    div.innerHTML = `
+      <div class="card-label">${card.label}</div>
+      <div class="card-value ${card.tone || ''}">${formatNumber(value)} ₽</div>
+    `;
+    el.appendChild(div);
+  });
+}
+
+/* ================== ПОИСК ================== */
+function filterRows() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const rows = document.querySelectorAll('#tableBody tr:not(.totals)');
+  rows.forEach(tr => {
+    if (!q) { tr.classList.remove('hidden'); return; }
+    tr.classList.toggle('hidden', !tr.textContent.toLowerCase().includes(q));
+  });
+  updateRowCount();
+}
+
+function updateRowCount() {
+  const rows = document.querySelectorAll('#tableBody tr:not(.totals)');
+  const visible = [...rows].filter(r => !r.classList.contains('hidden')).length;
+  const total = rows.length;
+  document.getElementById('rowCount').textContent =
+    visible === total ? `${total} записей` : `${visible} из ${total}`;
+}
+
+/* ================== СОРТИРОВКА ================== */
+let sortState = { col: null, dir: 'asc' };
+
+function sortByColumn(col, th) {
+  const tbody = document.getElementById('tableBody');
+  const dataRows = Array.from(tbody.querySelectorAll('tr:not(.totals)'));
+  const totalsTr = tbody.querySelector('tr.totals');
+  const type = th.dataset.type;
+
+  const headers = Array.from(document.querySelectorAll('th'));
+  const cellIdx = headers.findIndex(h => parseInt(h.dataset.col) === col);
+  if (cellIdx < 0) return;
+
+  if (sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+  else { sortState.col = col; sortState.dir = 'asc'; }
+
+  dataRows.sort((a, b) => {
+    const aText = a.cells[cellIdx]?.textContent || '';
+    const bText = b.cells[cellIdx]?.textContent || '';
+    let cmp;
+    if (type === 'number') {
+      cmp = parseFloat(aText.replace(/\s/g, '').replace(',', '.')) -
+            parseFloat(bText.replace(/\s/g, '').replace(',', '.'));
+      if (isNaN(cmp)) cmp = 0;
+    } else {
+      cmp = aText.localeCompare(bText, 'ru');
+    }
+    return sortState.dir === 'asc' ? cmp : -cmp;
+  });
+
+  dataRows.forEach(tr => tbody.appendChild(tr));
+  if (totalsTr) tbody.appendChild(totalsTr);
+
+  headers.forEach(h => { h.classList.remove('sorted'); h.querySelector('.sort-icon').textContent = '↕'; });
+  th.classList.add('sorted');
+  th.querySelector('.sort-icon').textContent = sortState.dir === 'asc' ? '↑' : '↓';
+}
+
+/* ================== УТИЛИТЫ ================== */
+function formatNumber(v) {
+  if (typeof v !== 'number' || !isFinite(v)) return '0';
+  if (Math.abs(v) < 0.01) return '0';
+  const rounded = Math.round(v * 100) / 100;
+  return rounded.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+}
+
+init();
+</script>
+</body>
+</html>
