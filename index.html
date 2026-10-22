@@ -86,6 +86,9 @@
   tbody tr.row-unpaid { background-color: #fff1f2 !important; }
   tbody tr.row-unpaid:hover { background-color: #ffe4e6 !important; }
 
+  /* Темная подсветка конкретной ячейки с долгом */
+  td.cell-unpaid { background-color: #ffe4e6; color: var(--danger) !important; font-weight: 600; }
+
   th.num, td.num { text-align: right; }
   td.num { font-variant-numeric: tabular-nums; }
   td.zero { color: #cbd5e1; }
@@ -163,7 +166,6 @@
 </div>
 
 <script>
-// Перехватчик ошибок (гарантирует, что спиннер исчезнет при любом сбое)
 window.addEventListener('error', function(e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
@@ -171,7 +173,6 @@ window.addEventListener('unhandledrejection', function(e) {
   showError('Ошибка загрузки: ' + (e.reason?.message || e.reason || 'неизвестная ошибка'));
 });
 
-// Таймер на 5 секунд. Если данные не загрузились - показываем ошибку.
 const loadTimeout = setTimeout(() => {
   showError('Превышено время ожидания (5 секунд). Скорее всего, файл data.xlsx не найден в репозитории.');
 }, 5000);
@@ -207,9 +208,8 @@ async function init() {
   document.getElementById('pageTitle').textContent = CONFIG.title;
 
   try {
-    // Проверка, загрузилась ли библиотека Excel
     if (typeof XLSX === 'undefined') {
-      throw new Error('Библиотека для чтения Excel (SheetJS) не загрузилась. Возможно, её блокирует VPN или антивирус.');
+      throw new Error('Библиотека для чтения Excel (SheetJS) не загрузилась.');
     }
 
     const resp = await fetch(CONFIG.dataFile, { cache: 'no-store' });
@@ -244,8 +244,18 @@ function render(rows) {
     throw new Error('Файл пуст или не содержит данных.');
   }
 
-  const headerRow = rows[0] || [];
-  const totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
+  let headerRow = rows[0] || [];
+  
+  // --- ИСПРАВЛЕНИЕ ЛИШНИХ СТОЛБЦОВ ---
+  // Ищем реальное количество столбцов, отбрасывая пустые заголовки в конце
+  let totalCols = headerRow.length;
+  while (totalCols > 0 && (!headerRow[totalCols - 1] || String(headerRow[totalCols - 1]).trim() === '')) {
+    totalCols--;
+  }
+  // Если совсем пусто, берем максимум
+  if (totalCols === 0) {
+    totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
+  }
 
   const dataRows = [];
   let totalsRow = null;
@@ -273,21 +283,20 @@ function render(rows) {
 
   // Автоматически определяем, какие столбцы являются числовыми (деньгами)
   const numericCols = [];
-  for (let c = 1; c < totalCols; c++) { // 0-й столбец - это всегда имена
+  for (let c = 1; c < totalCols; c++) { 
     if (isNumericColumn(dataRows, c)) numericCols.push(c);
   }
   
-  // Ищем столбец "Сдали" для подсветки должников
+  // Ищем столбцы "Сдали" и "Остаток", чтобы исключить их из логики подсветки долгов
   let statusColIndex = -1;
+  let remainingColIndex = -1;
   for (let c = 0; c < totalCols; c++) {
     const title = String(headerRow[c] || '').toLowerCase();
-    if (title.includes('сдал') || title.includes('оплата') || title.includes('взнос')) {
-      statusColIndex = c;
-      break;
-    }
+    if (title.includes('сдал') || title.includes('оплата') || title.includes('взнос')) statusColIndex = c;
+    if (title.includes('остаток') || title.includes('долг')) remainingColIndex = c;
   }
 
-  renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex);
+  renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex, remainingColIndex);
   document.getElementById('search').addEventListener('input', filterRows);
 }
 
@@ -298,14 +307,13 @@ function isNumericColumn(rows, colIndex) {
     const val = row[colIndex];
     if (val === '' || val == null) continue;
     validCount++;
-    // Защита от строк с пробелами или запятыми
     const num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.').replace(/\s/g, ''));
     if (!isNaN(num)) numCount++;
   }
   return validCount > 0 && (numCount / validCount) >= 0.5;
 }
 
-function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex) {
+function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex, remainingColIndex) {
   const theadMain = document.getElementById('tableHead');
   const theadTotals = document.getElementById('tableHeadTotals');
   const tbody = document.getElementById('tableBody');
@@ -317,7 +325,6 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
 
   const finalTotals = totalsRow || computeTotals(dataRows, totalCols);
 
-  // 1. Рендер заголовков (без иконок сортировки)
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
@@ -325,11 +332,9 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     theadMain.appendChild(th);
   }
 
-  // 2. Рендер итогов (вторая строка шапки)
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     const val = finalTotals[c];
-    
     if (numericSet.has(c) && typeof val === 'number' && !isNaN(val)) {
       th.classList.add('num');
       th.textContent = formatNumber(val);
@@ -339,17 +344,28 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     theadTotals.appendChild(th);
   }
 
-  // 3. Рендер строк с данными и подсветка должников
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     
-    // Проверяем, сдал ли ученик (если 0 или пусто - подсвечиваем строку)
-    if (statusColIndex !== -1) {
-      const statusVal = row[statusColIndex];
-      const num = typeof statusVal === 'number' ? statusVal : parseFloat(String(statusVal).replace(',', '.'));
+    // --- ЛОГИКА УМНОЙ ПОДСВЕТКИ ---
+    let isRowUnpaid = false;
+    for (let c = 1; c < totalCols; c++) {
+      // Пропускаем столбцы "Сдали" и "Остаток"
+      if (c === statusColIndex || c === remainingColIndex) continue;
+      if (!numericSet.has(c)) continue;
+
+      const val = row[c];
+      const num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
+      
+      // Если в столбце расходов стоит 0 или пусто
       if (isNaN(num) || Math.abs(num) < 0.01) {
-        tr.classList.add('row-unpaid');
+        isRowUnpaid = true;
+        // Не прерываем цикл, так как нам еще нужно будет покрасить сами ячейки
       }
+    }
+
+    if (isRowUnpaid) {
+      tr.classList.add('row-unpaid');
     }
 
     for (let c = 0; c < totalCols; c++) {
@@ -365,11 +381,17 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
         if (Math.abs(num) < 0.01) {
           td.textContent = '—';
           td.classList.add('zero');
-          if (c === statusColIndex) td.classList.add('unpaid'); // Красный текст для нуля в "Сдали"
+          
+          if (c === statusColIndex) {
+            td.classList.add('unpaid'); 
+          } else if (c !== remainingColIndex) {
+            // Красим конкретную ячейку с долгом чуть темнее
+            td.classList.add('cell-unpaid');
+          }
         } else {
           td.textContent = formatNumber(num);
           if (num < 0) td.classList.add('negative');
-          if (c === statusColIndex) td.classList.add('paid'); // Зеленый текст для "Сдали"
+          if (c === statusColIndex) td.classList.add('paid');
         }
       } else {
         const s = val === '' || val == null ? '—' : String(val);
