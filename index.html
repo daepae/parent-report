@@ -23,7 +23,7 @@
     -webkit-font-smoothing: antialiased;
   }
   
-  /* ВОТ ОНО - ЖЕЛЕЗНОЕ ПРАВИЛО СКРЫТИЯ */
+  /* Железное правило скрытия спиннера и элементов */
   [hidden] { display: none !important; }
 
   .container { width: 100%; max-width: 100%; margin: 0 auto; padding: 24px 32px 48px; }
@@ -58,31 +58,33 @@
 
   .table-wrapper { overflow-x: auto; width: 100%; max-height: 80vh; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  
+  /* Шапка таблицы */
   thead { position: sticky; top: 0; z-index: 10; }
   th {
     background: #f8fafc; color: var(--muted); font-weight: 600;
     text-align: left; padding: 12px 16px; font-size: 12px;
     text-transform: uppercase; letter-spacing: .04em;
     border-bottom: 1px solid var(--border); white-space: nowrap;
-    cursor: pointer; user-select: none; transition: background .15s, color .15s;
+    user-select: none;
   }
-  th:hover { background: #f1f5f9; color: var(--text); }
-  th .sort-icon { display: inline-block; margin-left: 4px; opacity: .4; font-size: 10px; }
-  th.sorted .sort-icon { opacity: 1; color: var(--accent); }
 
+  /* Строка с итогами в шапке */
   #tableHeadTotals th {
     background: #f1f5f9; color: var(--text); font-weight: 700;
     text-transform: none; font-size: 14px; padding: 10px 16px;
-    border-bottom: 2px solid var(--border); cursor: default;
+    border-bottom: 2px solid var(--border);
   }
-  #tableHeadTotals th:hover { background: #f1f5f9; }
   #tableHeadTotals th.num { color: var(--success); font-size: 15px; }
 
   td { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
   tbody tr { transition: background .1s; }
-  tbody tr:hover { background: #f8fafc; }
   tbody tr:last-child td { border-bottom: none; }
   tbody tr.hidden { display: none !important; }
+
+  /* Легкая красноватая подсветка всей строки должника */
+  tbody tr.row-unpaid { background-color: #fff1f2 !important; }
+  tbody tr.row-unpaid:hover { background-color: #ffe4e6 !important; }
 
   th.num, td.num { text-align: right; }
   td.num { font-variant-numeric: tabular-nums; }
@@ -161,6 +163,7 @@
 </div>
 
 <script>
+// Перехватчик ошибок (гарантирует, что спиннер исчезнет при любом сбое)
 window.addEventListener('error', function(e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
@@ -168,8 +171,9 @@ window.addEventListener('unhandledrejection', function(e) {
   showError('Ошибка загрузки: ' + (e.reason?.message || e.reason || 'неизвестная ошибка'));
 });
 
+// Таймер на 5 секунд. Если данные не загрузились - показываем ошибку.
 const loadTimeout = setTimeout(() => {
-  showError('Превышено время ожидания (5 секунд). Скорее всего, файл data.xlsx не найден в репозитории или браузер заблокировал загрузку.');
+  showError('Превышено время ожидания (5 секунд). Скорее всего, файл data.xlsx не найден в репозитории.');
 }, 5000);
 
 function showError(msg) {
@@ -203,6 +207,7 @@ async function init() {
   document.getElementById('pageTitle').textContent = CONFIG.title;
 
   try {
+    // Проверка, загрузилась ли библиотека Excel
     if (typeof XLSX === 'undefined') {
       throw new Error('Библиотека для чтения Excel (SheetJS) не загрузилась. Возможно, её блокирует VPN или антивирус.');
     }
@@ -235,6 +240,10 @@ async function init() {
 }
 
 function render(rows) {
+  if (!rows || rows.length === 0) {
+    throw new Error('Файл пуст или не содержит данных.');
+  }
+
   const headerRow = rows[0] || [];
   const totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
 
@@ -246,11 +255,14 @@ function render(rows) {
     if (!r || r.length === 0) continue;
 
     const firstCol = String(r[0] || '').trim();
-    const hasNumbers = r.some(cell => typeof cell === 'number');
+    const hasNumbers = r.some(cell => typeof cell === 'number' && !isNaN(cell));
     
+    // Итоговая строка: первая ячейка пустая, но есть числа
     if (firstCol === '' && hasNumbers) {
       totalsRow = r;
-    } else if (firstCol !== '') {
+    } 
+    // Строка с данными: есть имя в первой колонке
+    else if (firstCol !== '') {
       dataRows.push(r);
     }
   }
@@ -259,11 +271,13 @@ function render(rows) {
     throw new Error('Не найдено строк с именами. Убедитесь, что в столбце A есть ФИО детей.');
   }
 
+  // Автоматически определяем, какие столбцы являются числовыми (деньгами)
   const numericCols = [];
-  for (let c = 1; c < totalCols; c++) {
+  for (let c = 1; c < totalCols; c++) { // 0-й столбец - это всегда имена
     if (isNumericColumn(dataRows, c)) numericCols.push(c);
   }
   
+  // Ищем столбец "Сдали" для подсветки должников
   let statusColIndex = -1;
   for (let c = 0; c < totalCols; c++) {
     const title = String(headerRow[c] || '').toLowerCase();
@@ -284,7 +298,9 @@ function isNumericColumn(rows, colIndex) {
     const val = row[colIndex];
     if (val === '' || val == null) continue;
     validCount++;
-    if (typeof val === 'number') numCount++;
+    // Защита от строк с пробелами или запятыми
+    const num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.').replace(/\s/g, ''));
+    if (!isNaN(num)) numCount++;
   }
   return validCount > 0 && (numCount / validCount) >= 0.5;
 }
@@ -301,23 +317,19 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
 
   const finalTotals = totalsRow || computeTotals(dataRows, totalCols);
 
+  // 1. Рендер заголовков (без иконок сортировки)
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
-    th.dataset.col = c;
-    th.dataset.type = numericSet.has(c) ? 'number' : 'string';
     if (numericSet.has(c)) th.classList.add('num');
-
-    const icon = document.createElement('span');
-    icon.className = 'sort-icon'; icon.textContent = '↕';
-    th.appendChild(icon);
-    th.addEventListener('click', () => sortByColumn(c, th));
     theadMain.appendChild(th);
   }
 
+  // 2. Рендер итогов (вторая строка шапки)
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     const val = finalTotals[c];
+    
     if (numericSet.has(c) && typeof val === 'number' && !isNaN(val)) {
       th.classList.add('num');
       th.textContent = formatNumber(val);
@@ -327,26 +339,37 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     theadTotals.appendChild(th);
   }
 
+  // 3. Рендер строк с данными и подсветка должников
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
+    
+    // Проверяем, сдал ли ученик (если 0 или пусто - подсвечиваем строку)
+    if (statusColIndex !== -1) {
+      const statusVal = row[statusColIndex];
+      const num = typeof statusVal === 'number' ? statusVal : parseFloat(String(statusVal).replace(',', '.'));
+      if (isNaN(num) || Math.abs(num) < 0.01) {
+        tr.classList.add('row-unpaid');
+      }
+    }
+
     for (let c = 0; c < totalCols; c++) {
       const td = document.createElement('td');
-      td.dataset.col = c;
       const val = row[c];
       const isNum = numericSet.has(c);
 
       if (isNum) {
         td.classList.add('num');
-        let num = typeof val === 'number' ? val : 0;
+        let num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.').replace(/\s/g, ''));
+        if (isNaN(num)) num = 0;
 
         if (Math.abs(num) < 0.01) {
           td.textContent = '—';
           td.classList.add('zero');
-          if (c === statusColIndex) td.classList.add('unpaid');
+          if (c === statusColIndex) td.classList.add('unpaid'); // Красный текст для нуля в "Сдали"
         } else {
           td.textContent = formatNumber(num);
           if (num < 0) td.classList.add('negative');
-          if (c === statusColIndex) td.classList.add('paid');
+          if (c === statusColIndex) td.classList.add('paid'); // Зеленый текст для "Сдали"
         }
       } else {
         const s = val === '' || val == null ? '—' : String(val);
@@ -367,7 +390,8 @@ function computeTotals(dataRows, totalCols) {
     let sum = 0, hasValue = false;
     dataRows.forEach(r => {
       const v = r[c];
-      if (typeof v === 'number') { sum += v; hasValue = true; }
+      const num = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.').replace(/\s/g, ''));
+      if (!isNaN(num)) { sum += num; hasValue = true; }
     });
     totals[c] = hasValue ? sum : '';
   }
@@ -388,38 +412,6 @@ function updateRowCount() {
   const rows = document.querySelectorAll('#tableBody tr');
   const visible = [...rows].filter(r => !r.classList.contains('hidden')).length;
   document.getElementById('rowCount').textContent = visible === rows.length ? `${rows.length} записей` : `${visible} из ${rows.length}`;
-}
-
-let sortState = { col: null, dir: 'asc' };
-function sortByColumn(col, th) {
-  const tbody = document.getElementById('tableBody');
-  const dataRows = Array.from(tbody.querySelectorAll('tr'));
-  const type = th.dataset.type;
-
-  if (sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
-  else { sortState.col = col; sortState.dir = 'asc'; }
-
-  dataRows.sort((a, b) => {
-    const aText = a.cells[col]?.textContent || '';
-    const bText = b.cells[col]?.textContent || '';
-    let cmp;
-    if (type === 'number') {
-      cmp = (parseFloat(aText.replace(/\s/g, '').replace(',', '.')) || 0) -
-            (parseFloat(bText.replace(/\s/g, '').replace(',', '.')) || 0);
-    } else {
-      cmp = aText.localeCompare(bText, 'ru');
-    }
-    return sortState.dir === 'asc' ? cmp : -cmp;
-  });
-
-  dataRows.forEach(tr => tbody.appendChild(tr));
-
-  document.querySelectorAll('#tableHead th').forEach(h => {
-    h.classList.remove('sorted');
-    h.querySelector('.sort-icon').textContent = '↕';
-  });
-  th.classList.add('sorted');
-  th.querySelector('.sort-icon').textContent = sortState.dir === 'asc' ? '↑' : '↓';
 }
 
 function formatNumber(v) {
