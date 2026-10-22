@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Отчёт родительского комитета</title>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<!-- ТЕПЕРЬ БИБЛИОТЕКА ЗАГРУЖАЕТСЯ ИЗ ВАШЕГО ЖЕ РЕПОЗИТОРИЯ -->
+<script src="xlsx.full.min.js"></script>
 <style>
   :root {
     --bg: #f8fafc; --card: #fff; --text: #0f172a; --muted: #64748b;
@@ -57,7 +58,6 @@
 
   .table-wrapper { overflow-x: auto; width: 100%; max-height: 80vh; }
   
-  /* Таблица сжимается по контенту */
   table { width: auto; min-width: 100%; border-collapse: collapse; font-size: 14px; }
   
   thead { position: sticky; top: 0; z-index: 10; }
@@ -81,7 +81,6 @@
   tbody tr:last-child td { border-bottom: none; }
   tbody tr.hidden { display: none !important; }
 
-  /* Подсветка должников */
   tbody tr.row-unpaid { background-color: #fff1f2 !important; }
   tbody tr.row-unpaid:hover { background-color: #ffe4e6 !important; }
   td.cell-unpaid { background-color: #ffe4e6; color: var(--danger) !important; font-weight: 600; }
@@ -163,7 +162,6 @@
 </div>
 
 <script>
-// 1. ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК ОШИБОК
 window.addEventListener('error', function(e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
@@ -171,10 +169,9 @@ window.addEventListener('unhandledrejection', function(e) {
   showError('Ошибка загрузки: ' + (e.reason?.message || e.reason || 'неизвестная ошибка'));
 });
 
-// 2. ТАЙМАУТ НА ЗАГРУЗКУ (Защита от вечного спиннера)
 const loadTimeout = setTimeout(() => {
   showError('Превышено время ожидания. Файл data.xlsx не найден или GitHub Pages не отвечает.');
-}, 5000);
+}, 10000); // Увеличил таймаут до 10 сек на случай медленного мобильного интернета
 
 function showError(msg) {
   clearTimeout(loadTimeout);
@@ -190,7 +187,8 @@ function showError(msg) {
       <strong>Не удалось загрузить данные.</strong><br>
       Проверьте: <br>
       1. Файл <code>data.xlsx</code> загружен в репозиторий.<br>
-      2. Вы обновили страницу с зажатой клавишей <b>Ctrl + Shift + R</b>.<br>
+      2. Файл <code>xlsx.full.min.js</code> загружен в репозиторий.<br>
+      3. Вы обновили страницу.<br>
       <hr style="border:0; border-top: 1px solid #fecaca; margin: 10px 0;">
       <small style="opacity:.8;">Техническая информация: ${msg}</small>
     `;
@@ -202,7 +200,6 @@ const CONFIG = {
   title: 'Отчёт родительского комитета'
 };
 
-// Универсальная и безопасная функция очистки чисел
 function cleanNumber(val) {
   if (typeof val === 'number') return val;
   if (val === null || val === undefined || val === '') return NaN;
@@ -215,13 +212,12 @@ async function init() {
 
   try {
     if (typeof XLSX === 'undefined') {
-      throw new Error('Библиотека для чтения Excel не загрузилась.');
+      throw new Error('Файл xlsx.full.min.js не найден рядом с index.html.');
     }
 
     const resp = await fetch(CONFIG.dataFile, { cache: 'no-store' });
     if (!resp.ok) throw new Error('Файл не найден (HTTP ' + resp.status + ')');
 
-    // Работа с датой и временем (переводим в МСК)
     const lm = resp.headers.get('Last-Modified');
     if (lm) {
       const d = new Date(lm);
@@ -254,7 +250,6 @@ function render(rows) {
 
   let headerRow = rows[0] || [];
   
-  // Обрезаем фантомные пустые столбцы справа
   let totalCols = headerRow.length;
   while (totalCols > 0 && (!headerRow[totalCols - 1] || String(headerRow[totalCols - 1]).trim() === '')) {
     totalCols--;
@@ -274,12 +269,9 @@ function render(rows) {
     const hasLetters = /[a-zA-Zа-яА-Я]/.test(firstCol);
     const hasNumbers = r.some(cell => typeof cell === 'number' && !isNaN(cell));
     
-    // Если первая колонка пустая, но есть числа - это ИТОГИ
     if (firstCol === '' && hasNumbers) {
       totalsRow = r;
-    } 
-    // Если в первой колонке есть буквы (имя) - это ДАННЫЕ
-    else if (hasLetters) {
+    } else if (hasLetters) {
       dataRows.push(r);
     }
   }
@@ -288,13 +280,11 @@ function render(rows) {
     throw new Error('Не найдено строк с именами. Убедитесь, что в столбце A есть ФИО.');
   }
 
-  // Определяем числовые столбцы (начиная с 1-го)
   const numericCols = [];
   for (let c = 1; c < totalCols; c++) { 
     if (isNumericColumn(dataRows, c)) numericCols.push(c);
   }
   
-  // Ищем столбцы "Сдали" и "Остаток"
   let statusColIndex = -1;
   let remainingColIndex = -1;
   for (let c = 0; c < totalCols; c++) {
@@ -331,7 +321,6 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
 
   const finalTotals = totalsRow || computeTotals(dataRows, totalCols);
 
-  // Рендер заголовков
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
@@ -339,7 +328,6 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     theadMain.appendChild(th);
   }
 
-  // Рендер строки итогов в шапке
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     const val = finalTotals[c];
@@ -352,11 +340,9 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     theadTotals.appendChild(th);
   }
 
-  // Рендер данных
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     
-    // ЛОГИКА ПОДСВЕТКИ: проверяем только столбцы расходов
     let isRowUnpaid = false;
     for (let c = 1; c < totalCols; c++) {
       if (c === statusColIndex || c === remainingColIndex) continue;
@@ -387,7 +373,7 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
           if (c === statusColIndex) {
             td.classList.add('unpaid'); 
           } else if (c !== remainingColIndex) {
-            td.classList.add('cell-unpaid'); // Темная ячейка долга
+            td.classList.add('cell-unpaid');
           }
         } else {
           td.textContent = formatNumber(num);
