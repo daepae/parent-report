@@ -22,8 +22,11 @@
     font-size: 14px; line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-  .container { width: 100%; max-width: 100%; margin: 0 auto; padding: 24px 32px 48px; }
+  
+  /* ВОТ ОНО - ЖЕЛЕЗНОЕ ПРАВИЛО СКРЫТИЯ */
+  [hidden] { display: none !important; }
 
+  .container { width: 100%; max-width: 100%; margin: 0 auto; padding: 24px 32px 48px; }
   h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; letter-spacing: -.01em; }
   .subtitle { color: var(--muted); font-size: 13px; margin: 0; }
   header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
@@ -55,8 +58,6 @@
 
   .table-wrapper { overflow-x: auto; width: 100%; max-height: 80vh; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  
-  /* Шапка таблицы */
   thead { position: sticky; top: 0; z-index: 10; }
   th {
     background: #f8fafc; color: var(--muted); font-weight: 600;
@@ -69,7 +70,6 @@
   th .sort-icon { display: inline-block; margin-left: 4px; opacity: .4; font-size: 10px; }
   th.sorted .sort-icon { opacity: 1; color: var(--accent); }
 
-  /* Строка с итогами в шапке */
   #tableHeadTotals th {
     background: #f1f5f9; color: var(--text); font-weight: 700;
     text-transform: none; font-size: 14px; padding: 10px 16px;
@@ -82,7 +82,7 @@
   tbody tr { transition: background .1s; }
   tbody tr:hover { background: #f8fafc; }
   tbody tr:last-child td { border-bottom: none; }
-  tbody tr.hidden { display: none; }
+  tbody tr.hidden { display: none !important; }
 
   th.num, td.num { text-align: right; }
   td.num { font-variant-numeric: tabular-nums; }
@@ -106,6 +106,7 @@
     background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
     padding: 20px; border-radius: var(--radius);
     font-size: 14px; line-height: 1.6; margin-top: 20px;
+    word-break: break-word;
   }
   .error code { background: rgba(153,27,27,.08); padding: 2px 6px; border-radius: 4px; font-weight: 600; }
 
@@ -160,16 +161,38 @@
 </div>
 
 <script>
-// Глобальный перехватчик ошибок (чтобы спиннер 100% исчезал при любом сбое)
 window.addEventListener('error', function(e) {
+  showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
+});
+window.addEventListener('unhandledrejection', function(e) {
+  showError('Ошибка загрузки: ' + (e.reason?.message || e.reason || 'неизвестная ошибка'));
+});
+
+const loadTimeout = setTimeout(() => {
+  showError('Превышено время ожидания (5 секунд). Скорее всего, файл data.xlsx не найден в репозитории или браузер заблокировал загрузку.');
+}, 5000);
+
+function showError(msg) {
+  clearTimeout(loadTimeout);
   const loading = document.getElementById('loading');
   if (loading) loading.hidden = true;
+  const content = document.getElementById('content');
+  if (content) content.hidden = true;
+  
   const el = document.getElementById('error');
   if (el) {
     el.hidden = false;
-    el.innerHTML = `<strong>Произошла ошибка при отображении.</strong><br>Попробуйте обновить страницу.<br><small>${e.message}</small>`;
+    el.innerHTML = `
+      <strong>Не удалось загрузить данные.</strong><br>
+      Проверьте: <br>
+      1. Файл <code>data.xlsx</code> загружен в репозиторий.<br>
+      2. Название файла точь-в-точь <code>data.xlsx</code> (маленькими буквами).<br>
+      3. Вы обновили страницу с зажатой клавишей <b>Ctrl + Shift + R</b>.<br>
+      <hr style="border:0; border-top: 1px solid #fecaca; margin: 10px 0;">
+      <small style="opacity:.8;">Техническая информация: ${msg}</small>
+    `;
   }
-});
+}
 
 const CONFIG = {
   dataFile: 'data.xlsx',
@@ -179,14 +202,12 @@ const CONFIG = {
 async function init() {
   document.getElementById('pageTitle').textContent = CONFIG.title;
 
-  // Таймаут 10 секунд для fetch, чтобы не было вечной загрузки
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
-
   try {
-    const resp = await fetch(CONFIG.dataFile, { cache: 'no-store', signal: controller.signal });
-    clearTimeout(timeoutId);
-    
+    if (typeof XLSX === 'undefined') {
+      throw new Error('Библиотека для чтения Excel (SheetJS) не загрузилась. Возможно, её блокирует VPN или антивирус.');
+    }
+
+    const resp = await fetch(CONFIG.dataFile, { cache: 'no-store' });
     if (!resp.ok) throw new Error('Файл не найден (HTTP ' + resp.status + ')');
 
     const lm = resp.headers.get('Last-Modified');
@@ -197,31 +218,20 @@ async function init() {
     }
 
     const buf = await resp.arrayBuffer();
-    // cellFormula: false - важно, чтобы вместо формул типа =SUM(...) подтягивались готовые числа
-    const wb = XLSX.read(buf, { type: 'array', cellFormula: false, cellHTML: false });
+    const wb = XLSX.read(buf, { type: 'array', cellFormula: false });
     const ws = wb.Sheets[wb.SheetNames[0]];
     if (!ws) throw new Error('В файле нет листов');
 
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, blankrows: true });
     render(rows);
-  } catch (e) {
-    showError(e);
-  } finally {
+    
+    clearTimeout(loadTimeout);
     document.getElementById('loading').hidden = true;
-  }
-}
+    document.getElementById('content').hidden = false;
 
-function showError(e) {
-  document.getElementById('loading').hidden = true;
-  document.getElementById('content').hidden = true;
-  
-  const el = document.getElementById('error');
-  el.hidden = false;
-  el.innerHTML = `
-    <strong>Не удалось загрузить данные.</strong><br>
-    Убедитесь, что сайт открыт по ссылке GitHub и файл <code>${CONFIG.dataFile}</code> загружен в репозиторий.<br>
-    <small style="opacity:.7;margin-top:8px;display:inline-block;">Ошибка: ${e.message}</small>
-  `;
+  } catch (e) {
+    showError(e.message);
+  }
 }
 
 function render(rows) {
@@ -231,48 +241,39 @@ function render(rows) {
   const dataRows = [];
   let totalsRow = null;
 
-  // Умный поиск данных и итогов
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.length === 0) continue;
 
     const firstCol = String(r[0] || '').trim();
-    const hasNumbers = r.some(cell => typeof cell === 'number' || (typeof cell === 'string' && !isNaN(parseFloat(cell.replace(',', '.')))));
-
-    // Если первая колонка пустая, но в строке есть числа - это ИТОГИ
+    const hasNumbers = r.some(cell => typeof cell === 'number');
+    
     if (firstCol === '' && hasNumbers) {
       totalsRow = r;
-    } 
-    // Если в первой колонке есть текст (имя) - это ДАННЫЕ
-    else if (firstCol !== '') {
+    } else if (firstCol !== '') {
       dataRows.push(r);
     }
   }
 
   if (dataRows.length === 0) {
-    throw new Error('Не найдено строк с данными (с именами). Проверьте файл Excel.');
+    throw new Error('Не найдено строк с именами. Убедитесь, что в столбце A есть ФИО детей.');
   }
 
-  // Вычисляем числовые столбцы (исключаем первый столбец с именами)
   const numericCols = [];
-  for (let c = 0; c < totalCols; c++) {
-    if (c === 0) continue; // 0-й столбец - это всегда ФИО
+  for (let c = 1; c < totalCols; c++) {
     if (isNumericColumn(dataRows, c)) numericCols.push(c);
   }
   
-  // Ищем столбец "Сдали" для подсветки зеленым/красным
   let statusColIndex = -1;
   for (let c = 0; c < totalCols; c++) {
     const title = String(headerRow[c] || '').toLowerCase();
-    if (title.includes('взнос') || title.includes('сдал') || title.includes('оплата') || title.includes('сдали')) {
+    if (title.includes('сдал') || title.includes('оплата') || title.includes('взнос')) {
       statusColIndex = c;
       break;
     }
   }
 
   renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex);
-
-  document.getElementById('content').hidden = false;
   document.getElementById('search').addEventListener('input', filterRows);
 }
 
@@ -283,24 +284,9 @@ function isNumericColumn(rows, colIndex) {
     const val = row[colIndex];
     if (val === '' || val == null) continue;
     validCount++;
-    const num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
-    if (!isNaN(num)) numCount++;
+    if (typeof val === 'number') numCount++;
   }
   return validCount > 0 && (numCount / validCount) >= 0.5;
-}
-
-function computeTotals(dataRows, totalCols) {
-  const totals = [];
-  for (let c = 0; c < totalCols; c++) {
-    let sum = 0, hasValue = false;
-    dataRows.forEach(r => {
-      const v = r[c];
-      const num = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
-      if (!isNaN(num)) { sum += num; hasValue = true; }
-    });
-    totals[c] = hasValue ? sum : '';
-  }
-  return totals;
 }
 
 function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, statusColIndex) {
@@ -313,15 +299,11 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
   theadTotals.innerHTML = '';
   tbody.innerHTML = '';
 
-  // Если в файле нет строки итогов, считаем сами
   const finalTotals = totalsRow || computeTotals(dataRows, totalCols);
 
-  // 1. Рендер заголовков
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
-    let title = headerRow[c] || '';
-    
-    th.textContent = String(title);
+    th.textContent = String(headerRow[c] || '');
     th.dataset.col = c;
     th.dataset.type = numericSet.has(c) ? 'number' : 'string';
     if (numericSet.has(c)) th.classList.add('num');
@@ -333,11 +315,9 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     theadMain.appendChild(th);
   }
 
-  // 2. Рендер итогов (вторая строка шапки)
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     const val = finalTotals[c];
-    
     if (numericSet.has(c) && typeof val === 'number' && !isNaN(val)) {
       th.classList.add('num');
       th.textContent = formatNumber(val);
@@ -347,7 +327,6 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
     theadTotals.appendChild(th);
   }
 
-  // 3. Рендер строк с данными
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     for (let c = 0; c < totalCols; c++) {
@@ -358,8 +337,7 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
 
       if (isNum) {
         td.classList.add('num');
-        let num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
-        if (isNaN(num)) num = 0;
+        let num = typeof val === 'number' ? val : 0;
 
         if (Math.abs(num) < 0.01) {
           td.textContent = '—';
@@ -381,6 +359,19 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
   });
 
   updateRowCount();
+}
+
+function computeTotals(dataRows, totalCols) {
+  const totals = [];
+  for (let c = 0; c < totalCols; c++) {
+    let sum = 0, hasValue = false;
+    dataRows.forEach(r => {
+      const v = r[c];
+      if (typeof v === 'number') { sum += v; hasValue = true; }
+    });
+    totals[c] = hasValue ? sum : '';
+  }
+  return totals;
 }
 
 function filterRows() {
