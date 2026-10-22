@@ -160,7 +160,7 @@
 </div>
 
 <script>
-// Глобальный перехватчик ошибок, чтобы спиннер 100% исчезал при любом сбое
+// Глобальный перехватчик ошибок (чтобы спиннер 100% исчезал при любом сбое)
 window.addEventListener('error', function(e) {
   const loading = document.getElementById('loading');
   if (loading) loading.hidden = true;
@@ -179,8 +179,14 @@ const CONFIG = {
 async function init() {
   document.getElementById('pageTitle').textContent = CONFIG.title;
 
+  // Таймаут 10 секунд для fetch, чтобы не было вечной загрузки
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
   try {
-    const resp = await fetch(CONFIG.dataFile, { cache: 'no-store' });
+    const resp = await fetch(CONFIG.dataFile, { cache: 'no-store', signal: controller.signal });
+    clearTimeout(timeoutId);
+    
     if (!resp.ok) throw new Error('Файл не найден (HTTP ' + resp.status + ')');
 
     const lm = resp.headers.get('Last-Modified');
@@ -191,6 +197,7 @@ async function init() {
     }
 
     const buf = await resp.arrayBuffer();
+    // cellFormula: false - важно, чтобы вместо формул типа =SUM(...) подтягивались готовые числа
     const wb = XLSX.read(buf, { type: 'array', cellFormula: false, cellHTML: false });
     const ws = wb.Sheets[wb.SheetNames[0]];
     if (!ws) throw new Error('В файле нет листов');
@@ -224,42 +231,36 @@ function render(rows) {
   const dataRows = [];
   let totalsRow = null;
 
-  let dataStartIndex = 1;
+  // Умный поиск данных и итогов
   for (let i = 1; i < rows.length; i++) {
-    const r = rows[i] || [];
-    if (typeof r[0] === 'number' && r[0] > 0) {
-      dataStartIndex = i;
-      break;
-    }
-  }
+    const r = rows[i];
+    if (!r || r.length === 0) continue;
 
-  for (let i = dataStartIndex; i < rows.length; i++) {
-    const r = rows[i] || [];
-    const rowText = r.join(' ').toLowerCase();
-    
-    // Ищем строку с итогами. У вас в файле она называется "общий"
-    if (rowText.includes('итог') || rowText.includes('всего') || rowText.includes('общий')) {
+    const firstCol = String(r[0] || '').trim();
+    const hasNumbers = r.some(cell => typeof cell === 'number' || (typeof cell === 'string' && !isNaN(parseFloat(cell.replace(',', '.')))));
+
+    // Если первая колонка пустая, но в строке есть числа - это ИТОГИ
+    if (firstCol === '' && hasNumbers) {
       totalsRow = r;
-      continue;
-    }
-    if (typeof r[0] === 'number' && r[0] > 0) {
+    } 
+    // Если в первой колонке есть текст (имя) - это ДАННЫЕ
+    else if (firstCol !== '') {
       dataRows.push(r);
     }
   }
 
   if (dataRows.length === 0) {
-    throw new Error('Не найдено строк с данными. Проверьте файл Excel.');
+    throw new Error('Не найдено строк с данными (с именами). Проверьте файл Excel.');
   }
 
-  if (!totalsRow) totalsRow = computeTotals(dataRows, totalCols);
-
+  // Вычисляем числовые столбцы (исключаем первый столбец с именами)
   const numericCols = [];
   for (let c = 0; c < totalCols; c++) {
-    const title = String(headerRow[c] || '').toLowerCase();
-    if (c === 0 || title.includes('телефон') || title.includes('номер') || title.includes('фио')) continue;
+    if (c === 0) continue; // 0-й столбец - это всегда ФИО
     if (isNumericColumn(dataRows, c)) numericCols.push(c);
   }
   
+  // Ищем столбец "Сдали" для подсветки зеленым/красным
   let statusColIndex = -1;
   for (let c = 0; c < totalCols; c++) {
     const title = String(headerRow[c] || '').toLowerCase();
@@ -282,21 +283,22 @@ function isNumericColumn(rows, colIndex) {
     const val = row[colIndex];
     if (val === '' || val == null) continue;
     validCount++;
-    if (typeof val === 'number') numCount++;
+    const num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
+    if (!isNaN(num)) numCount++;
   }
-  return validCount > 0 && (numCount / validCount) >= 0.6;
+  return validCount > 0 && (numCount / validCount) >= 0.5;
 }
 
 function computeTotals(dataRows, totalCols) {
   const totals = [];
   for (let c = 0; c < totalCols; c++) {
-    let sum = 0, allNumeric = true, hasValue = false;
+    let sum = 0, hasValue = false;
     dataRows.forEach(r => {
       const v = r[c];
-      if (typeof v === 'number') { sum += v; hasValue = true; }
-      else if (v !== '' && v != null) allNumeric = false;
+      const num = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+      if (!isNaN(num)) { sum += num; hasValue = true; }
     });
-    totals[c] = (allNumeric && hasValue) ? sum : '';
+    totals[c] = hasValue ? sum : '';
   }
   return totals;
 }
@@ -311,11 +313,13 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
   theadTotals.innerHTML = '';
   tbody.innerHTML = '';
 
+  // Если в файле нет строки итогов, считаем сами
+  const finalTotals = totalsRow || computeTotals(dataRows, totalCols);
+
   // 1. Рендер заголовков
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     let title = headerRow[c] || '';
-    if (c === 0 && (title === '29' || title === '')) title = '№';
     
     th.textContent = String(title);
     th.dataset.col = c;
@@ -332,17 +336,18 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
   // 2. Рендер итогов (вторая строка шапки)
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
-    const val = totalsRow[c];
-    if (numericSet.has(c) && typeof val === 'number') {
+    const val = finalTotals[c];
+    
+    if (numericSet.has(c) && typeof val === 'number' && !isNaN(val)) {
       th.classList.add('num');
       th.textContent = formatNumber(val);
     } else {
-      th.textContent = val === '' || val == null ? '' : String(val);
+      th.textContent = '';
     }
     theadTotals.appendChild(th);
   }
 
-  // 3. Рендер строк
+  // 3. Рендер строк с данными
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     for (let c = 0; c < totalCols; c++) {
@@ -353,7 +358,8 @@ function renderTable(headerRow, dataRows, totalsRow, totalCols, numericCols, sta
 
       if (isNum) {
         td.classList.add('num');
-        const num = typeof val === 'number' ? val : (parseFloat(val) || 0);
+        let num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
+        if (isNaN(num)) num = 0;
 
         if (Math.abs(num) < 0.01) {
           td.textContent = '—';
