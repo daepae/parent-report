@@ -93,7 +93,6 @@
   .progress-bar-bg { flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; margin: 0 12px; overflow: hidden;}
   .progress-bar-fill { height: 100%; border-radius: 4px; }
   
-  /* Смягченные цвета */
   .fill-green { background: #4ade80; }
   .fill-yellow { background: #fcd34d; }
   .fill-red { background: #f87171; }
@@ -171,8 +170,6 @@
 
     <div id="tab-stats" hidden>
       <section class="dashboard-section">
-        
-        <!-- KPI Блок -->
         <div class="kpi-grid">
           <div class="kpi-card">
             <div class="kpi-label">Собрано всего</div>
@@ -189,26 +186,24 @@
         </div>
 
         <div class="stats-grid">
-          <!-- Блок 1: Дисциплина (Более мягкие формулировки) -->
           <div class="stat-card">
             <div class="stat-title">Статус сборов</div>
             <div class="progress-list" id="paymentStats"></div>
           </div>
 
-          <!-- Блок 2: Куда ушли деньги -->
           <div class="stat-card">
             <div class="stat-title">На что потрачены деньги</div>
             <div class="price-list" id="expensesList"></div>
           </div>
         </div>
-
       </section>
     </div>
   </div>
 </div>
 
 <script>
-let globalData = { dataRows: [], headerRow: [], totalsRow: null, numericCols: [] };
+// Храним только сырые данные
+let globalData = { dataRows: [], headerRow: [], numericCols: [], totalCols: 0 };
 
 window.addEventListener('error', function(e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
@@ -247,11 +242,13 @@ function switchTab(tabName) {
   }
 }
 
+// Безопасный парсинг чисел (удаляет пробелы, запятые, возвращает NaN если не число)
 function cleanNumber(val) {
   if (typeof val === 'number') return val;
   if (val === null || val === undefined || val === '') return NaN;
   const str = String(val).replace(/[\s\u00A0]/g, '').replace(',', '.');
-  return parseFloat(str);
+  const num = parseFloat(str);
+  return isNaN(num) ? NaN : num;
 }
 
 async function init() {
@@ -297,24 +294,29 @@ function parseData(rows) {
   if (totalCols === 0) totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
 
   const dataRows = [];
-  let totalsRow = null;
 
+  // Читаем ТОЛЬКО строки с именами. Игнорируем любые строки Итого/Всего/Общий.
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.length === 0) continue;
     const firstCol = String(r[0] || '').trim().toLowerCase();
     
-    if (firstCol.includes('итог') || firstCol.includes('общий') || firstCol.includes('всего')) { totalsRow = r; continue; }
-    if (firstCol === '' && r.some(c => typeof c === 'number')) { totalsRow = r; continue; }
-    if (firstCol !== '' && /[a-zA-Zа-яА-Я]/.test(firstCol)) { dataRows.push(r); }
+    if (firstCol.includes('итог') || firstCol.includes('общий') || firstCol.includes('всего')) continue;
+    if (firstCol === '' && r.some(c => typeof c === 'number')) continue;
+    
+    if (firstCol !== '' && /[a-zA-Zа-яА-Я]/.test(firstCol)) { 
+      dataRows.push(r); 
+    }
   }
 
-  if (dataRows.length === 0) throw new Error('Не найдено строк с именами.');
+  if (dataRows.length === 0) throw new Error('Не найдено строк с именами детей.');
 
   const numericCols = [];
-  for (let c = 1; c < totalCols; c++) { if (isNumericColumn(dataRows, c)) numericCols.push(c); }
+  for (let c = 1; c < totalCols; c++) { 
+    if (isNumericColumn(dataRows, c)) numericCols.push(c); 
+  }
 
-  globalData = { dataRows, headerRow, totalsRow, numericCols, totalCols };
+  globalData = { dataRows, headerRow, numericCols, totalCols };
 
   renderTable();
   renderStats();
@@ -334,21 +336,8 @@ function isNumericColumn(rows, colIndex) {
   return validCount > 0 && (numCount / validCount) >= 0.3;
 }
 
-function getFinalTotals(dataRows, totalsRow, totalCols) {
-  const computed = computeTotals(dataRows, totalCols);
-  const final = [];
-  for (let c = 0; c < totalCols; c++) {
-    if (totalsRow && typeof totalsRow[c] === 'number' && !isNaN(totalsRow[c])) {
-      final[c] = totalsRow[c];
-    } else {
-      final[c] = computed[c];
-    }
-  }
-  return final;
-}
-
 function renderTable() {
-  const { headerRow, dataRows, totalsRow, totalCols, numericCols } = globalData;
+  const { headerRow, dataRows, numericCols, totalCols } = globalData;
   const theadMain = document.getElementById('tableHead');
   const theadTotals = document.getElementById('tableHeadTotals');
   const tbody = document.getElementById('tableBody');
@@ -358,8 +347,28 @@ function renderTable() {
   theadTotals.innerHTML = '';
   tbody.innerHTML = '';
 
-  const finalTotals = getFinalTotals(dataRows, totalsRow, totalCols);
+  // 1. Считаем ИТОГИ полностью сами, игнорируя Excel
+  const computedTotals = new Array(totalCols).fill(0);
+  
+  dataRows.forEach(row => {
+    // Столбец 1: Сдали
+    computedTotals[1] += cleanNumber(row[1]) || 0;
+    // Столбцы расходов (с 3-го и далее)
+    for (let c = 3; c < totalCols; c++) {
+      if (numericSet.has(c)) {
+        computedTotals[c] += cleanNumber(row[c]) || 0;
+      }
+    }
+  });
+  
+  // Столбец 2: Остаток. Считаем как (Собрано - Сумма всех расходов)
+  let totalSpent = 0;
+  for (let c = 3; c < totalCols; c++) {
+    if (numericSet.has(c)) totalSpent += computedTotals[c];
+  }
+  computedTotals[2] = computedTotals[1] - totalSpent;
 
+  // 2. Рендерим шапку
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
@@ -369,21 +378,22 @@ function renderTable() {
 
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
-    const val = finalTotals[c];
-    if (numericSet.has(c) && typeof val === 'number' && !isNaN(val)) {
+    if (numericSet.has(c)) {
       th.classList.add('num');
-      th.textContent = formatNumber(val);
+      th.textContent = formatNumber(computedTotals[c]);
     } else {
       th.textContent = '';
     }
     theadTotals.appendChild(th);
   }
 
+  // 3. Рендерим строки детей
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     tr.classList.add('hidden'); 
     
     let isRowUnpaid = false;
+    // Проверяем долги только по столбцам расходов (с 3-го)
     for (let c = 3; c < totalCols; c++) { 
       if (!numericSet.has(c)) continue;
       const num = cleanNumber(row[c]);
@@ -391,14 +401,21 @@ function renderTable() {
     }
     if (isRowUnpaid) tr.classList.add('row-unpaid');
 
+    // Считаем личный остаток ребенка
+    const childPaid = cleanNumber(row[1]) || 0;
+    let childSpent = 0;
+    for (let c = 3; c < totalCols; c++) {
+      if (numericSet.has(c)) childSpent += cleanNumber(row[c]) || 0;
+    }
+    const childBalance = childPaid - childSpent;
+
     for (let c = 0; c < totalCols; c++) {
       const td = document.createElement('td');
-      const val = row[c];
       const isNum = numericSet.has(c);
 
       if (isNum) {
         td.classList.add('num');
-        let num = cleanNumber(val);
+        let num = (c === 2) ? childBalance : cleanNumber(row[c]);
         if (isNaN(num)) num = 0;
 
         if (Math.abs(num) < 0.01) {
@@ -412,7 +429,7 @@ function renderTable() {
           if (c === 1) td.classList.add('paid'); 
         }
       } else {
-        const s = val === '' || val == null ? '—' : String(val);
+        const s = row[c] === '' || row[c] == null ? '—' : String(row[c]);
         td.textContent = s;
         if (s === '—') td.classList.add('zero');
       }
@@ -423,24 +440,29 @@ function renderTable() {
 }
 
 function renderStats() {
-  const { headerRow, dataRows, totalsRow, totalCols, numericCols } = globalData;
-  const finalTotals = getFinalTotals(dataRows, totalsRow, totalCols);
+  const { headerRow, dataRows, numericCols, totalCols } = globalData;
+  const numericSet = new Set(numericCols);
   const studentsCount = dataRows.length;
 
-  const statusColIndex = 1; 
-  const remainingColIndex = 2; 
+  // Считаем глобальные итоги
+  let collected = 0;
+  let spent = 0;
+  const expenseTotals = {};
+
+  dataRows.forEach(row => {
+    collected += cleanNumber(row[1]) || 0;
+    for (let c = 3; c < totalCols; c++) {
+      if (numericSet.has(c)) {
+        const val = cleanNumber(row[c]) || 0;
+        spent += val;
+        expenseTotals[c] = (expenseTotals[c] || 0) + val;
+      }
+    }
+  });
+  
+  const balance = collected - spent;
 
   // --- 1. KPI БЛОК ---
-  const collected = typeof finalTotals[statusColIndex] === 'number' ? finalTotals[statusColIndex] : 0;
-  
-  let spent = 0;
-  numericCols.forEach(c => {
-    if (c < 3) return;
-    spent += (typeof finalTotals[c] === 'number' ? finalTotals[c] : 0);
-  });
-
-  let balance = typeof finalTotals[remainingColIndex] === 'number' ? finalTotals[remainingColIndex] : (collected - spent);
-
   document.getElementById('kpi-collected').textContent = formatNumber(collected) + ' ₽';
   document.getElementById('kpi-spent').textContent = formatNumber(spent) + ' ₽';
   
@@ -448,21 +470,21 @@ function renderStats() {
   balanceEl.textContent = formatNumber(balance) + ' ₽';
   if (balance < 0) balanceEl.classList.add('red'); else balanceEl.classList.remove('red');
 
-  // --- 2. СТАТУС СБОРОВ (Мягкие формулировки) ---
+  // --- 2. СТАТУС СБОРОВ ---
   const pStatsEl = document.getElementById('paymentStats');
   let fullyPaid = 0, partiallyPaid = 0, notPaid = 0;
 
   dataRows.forEach(row => {
-    const paidAmount = cleanNumber(row[statusColIndex]);
+    const paidAmount = cleanNumber(row[1]) || 0;
     let hasDebt = false;
     
     for (let c = 3; c < totalCols; c++) {
-      if (!numericCols.includes(c)) continue;
+      if (!numericSet.has(c)) continue;
       const val = cleanNumber(row[c]);
       if (isNaN(val) || Math.abs(val) < 0.01) hasDebt = true;
     }
 
-    if (isNaN(paidAmount) || Math.abs(paidAmount) < 0.01) {
+    if (Math.abs(paidAmount) < 0.01) {
       notPaid++;
     } else if (hasDebt) {
       partiallyPaid++;
@@ -494,9 +516,9 @@ function renderStats() {
   expensesEl.innerHTML = '';
   
   let hasExpenses = false;
-  numericCols.forEach(c => {
-    if (c < 3) return;
-    const totalAmount = typeof finalTotals[c] === 'number' ? finalTotals[c] : 0;
+  for (let c = 3; c < totalCols; c++) {
+    if (!numericSet.has(c)) continue;
+    const totalAmount = expenseTotals[c] || 0;
     if (totalAmount > 0) {
       hasExpenses = true;
       const name = headerRow[c] || `Колонка ${c+1}`;
@@ -506,24 +528,11 @@ function renderStats() {
       div.innerHTML = `<span>${name}</span> <span>${formatNumber(totalAmount)} ₽</span>`;
       expensesEl.appendChild(div);
     }
-  });
+  }
 
   if (!hasExpenses) {
     expensesEl.innerHTML = '<div style="color:var(--muted); font-size:14px;">Расходов пока нет</div>';
   }
-}
-
-function computeTotals(dataRows, totalCols) {
-  const totals = [];
-  for (let c = 0; c < totalCols; c++) {
-    let sum = 0, hasValue = false;
-    dataRows.forEach(r => {
-      const num = cleanNumber(r[c]);
-      if (!isNaN(num)) { sum += num; hasValue = true; }
-    });
-    totals[c] = hasValue ? sum : '';
-  }
-  return totals;
 }
 
 function filterRows() {
