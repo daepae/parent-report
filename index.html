@@ -97,38 +97,24 @@
   .fill-yellow { background: #fcd34d; }
   .fill-red { background: #f87171; }
 
-  .price-list { 
-    display: flex; flex-direction: column; gap: 0; 
-    max-height: 400px; overflow-y: auto; padding-right: 8px;
-  }
+  .price-list { display: flex; flex-direction: column; gap: 0; max-height: 400px; overflow-y: auto; padding-right: 8px; }
   .price-list::-webkit-scrollbar { width: 6px; }
   .price-list::-webkit-scrollbar-track { background: transparent; }
   .price-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
   .price-list::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   .price-list { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
 
-  .price-item { 
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 14px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); gap: 16px;
-  }
+  .price-item { display: flex; justify-content: space-between; align-items: center; font-size: 14px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); gap: 16px; }
   .price-item:first-child { padding-top: 0; }
   .price-item:last-child { border-bottom: none; padding-bottom: 0; }
-  
-  .price-name { 
-    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-    color: var(--muted); line-height: 1.4; flex: 1;
-  }
-  .price-amount { 
-    font-size: 15px; font-weight: 700; color: var(--success); 
-    white-space: nowrap; font-variant-numeric: tabular-nums;
-  }
+  .price-name { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); line-height: 1.4; flex: 1; }
+  .price-amount { font-size: 15px; font-weight: 700; color: var(--success); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
   .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--muted); gap: 16px; }
   .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 20px; border-radius: var(--radius); font-size: 14px; line-height: 1.6; margin-top: 20px; word-break: break-word; }
-  .error code { background: rgba(153,27,27,.08); padding: 2px 6px; border-radius: 4px; font-weight: 600; }
 
   @media (max-width: 768px) {
     .container { padding: 16px 12px; }
@@ -210,7 +196,6 @@
             <div class="stat-title">Статус сборов</div>
             <div class="progress-list" id="paymentStats"></div>
           </div>
-
           <div class="stat-card">
             <div class="stat-title">На что потрачены деньги</div>
             <div class="price-list" id="expensesList"></div>
@@ -268,33 +253,29 @@ function cleanNumber(val) {
   return isNaN(num) ? NaN : num;
 }
 
-// Надежное определение зеленого цвета (с защитой от ошибок)
-function isGreenColor(cell) {
+// СТРОГАЯ проверка статуса по HEX-коду цвета
+function getCellStatus(cell) {
   try {
-    if (!cell || !cell.s || !cell.s.fill) return false;
-    const fill = cell.s.fill;
-    const fg = fill.fgColor || fill.bgColor;
+    if (!cell || !cell.s || !cell.s.fill || !cell.s.fill.fgColor) return 'debt';
     
-    if (fg && fg.rgb) {
-      const rgb = String(fg.rgb).toUpperCase();
-      if (rgb.startsWith('FF') && rgb.length === 8) {
-        const r = parseInt(rgb.substring(2, 4), 16);
-        const g = parseInt(rgb.substring(4, 6), 16);
-        const b = parseInt(rgb.substring(6, 8), 16);
-        // Зеленый канал должен доминировать
-        return g > 100 && g > r * 1.2 && g > b * 1.2;
-      }
+    // Приводим строку к верхнему регистру
+    let rgb = String(cell.s.fill.fgColor.rgb || '').toUpperCase();
+    
+    // Отрезаем альфа-канал (прозрачность), если он есть (FFC6EFCE -> C6EFCE)
+    if (rgb.length === 8 && rgb.startsWith('FF')) {
+      rgb = rgb.substring(2);
     }
-    // Если цвет задан через тему (theme), но он явно не белый и не пустой
-    if (fg && fg.theme !== undefined) {
-       // В темах Excel зеленый обычно имеет индекс 4, 5, 6, 7, 8, 9 (зависит от палитры)
-       // Для надежности, если это не 0 и не 1 (обычно белый/черный), можно пропустить, 
-       // но лучше довериться RGB. Если RGB нет, считаем что не зеленый (перестраховка для кассы).
-    }
+    
+    // Строгие цвета
+    if (rgb === 'C6EFCE') return 'paid';     // Зеленый
+    if (rgb === 'FFEB9C' || rgb === 'FFFF00') return 'excused'; // Желтый
+    if (rgb === 'FFC7CE') return 'debt';     // Красный
+    
+    // Все остальное (белый, прозрачный и т.д.) - считаем долгом для безопасности
+    return 'debt';
   } catch (e) {
-    console.warn('Ошибка при чтении цвета ячейки', e);
+    return 'debt';
   }
-  return false;
 }
 
 async function init() {
@@ -321,16 +302,6 @@ async function init() {
 
     const range = XLSX.utils.decode_range(ws['!ref']);
     let maxCols = range.e.c + 1;
-    
-    // Обрезаем пустые столбцы справа, если они есть
-    while (maxCols > 1) {
-      let isEmpty = true;
-      for (let r = 0; r <= range.e.r; r++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: r, c: maxCols - 1 })];
-        if (cell && cell.v !== undefined && cell.v !== '') { isEmpty = false; break; }
-      }
-      if (isEmpty) maxCols--; else break;
-    }
 
     const rows = [];
     for (let r = 0; r <= range.e.r; r++) {
@@ -339,7 +310,7 @@ async function init() {
         const cell = ws[XLSX.utils.encode_cell({ r: r, c: c })];
         row.push({
           v: cell ? cell.v : '',
-          green: isGreenColor(cell)
+          status: getCellStatus(cell)
         });
       }
       rows.push(row);
@@ -362,10 +333,10 @@ function parseData(rows, totalCols) {
 
   const headerRow = rows[0].map(c => c.v);
   const dataRows = [];
-  let statusColIndex = 1; // По умолчанию второй столбец (Сдали)
-  let remainingColIndex = 2; // По умолчанию третий (Остаток)
+  let statusColIndex = 1;
+  let remainingColIndex = 2;
 
-  // Ищем точные индексы столбцов
+  // Ищем столбцы по названиям
   headerRow.forEach((title, idx) => {
     const t = String(title || '').toLowerCase();
     if (t.includes('сдал') || t.includes('оплата') || t.includes('взнос')) statusColIndex = idx;
@@ -427,7 +398,7 @@ function renderTable() {
     for (let c = 3; c < totalCols; c++) {
       if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) {
         // В кассу берем ТОЛЬКО зеленые ячейки
-        if (row[c].green) {
+        if (row[c].status === 'paid') {
           const val = cleanNumber(row[c].v);
           if (!isNaN(val)) computedTotals[c] += val;
         }
@@ -439,6 +410,7 @@ function renderTable() {
   for (let c = 3; c < totalCols; c++) {
     if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) totalSpent += computedTotals[c];
   }
+  // Считаем Остаток сами, игнорируя формулу Excel
   computedTotals[remainingColIndex] = computedTotals[statusColIndex] - totalSpent;
 
   // 2. Рендерим шапку
@@ -460,30 +432,31 @@ function renderTable() {
     theadTotals.appendChild(th);
   }
 
-  // 3. Рендерим строки
+  // 3. Рендерим строки детей
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     tr.classList.add('hidden'); 
     
+    // Подсветка всей строки (если есть хоть один долг)
     let isRowUnpaid = false;
     for (let c = 3; c < totalCols; c++) { 
       if (!numericSet.has(c) || c === remainingColIndex) continue;
       const val = row[c].v;
-      const isGreen = row[c].green;
+      const status = row[c].status;
       const num = cleanNumber(val);
       
-      // Если есть цифра, но ячейка НЕ зеленая — это долг
-      if (!isGreen && !isNaN(num) && Math.abs(num) >= 0.01) {
+      if (status === 'debt' && !isNaN(num) && Math.abs(num) >= 0.01) {
         isRowUnpaid = true;
       }
     }
     if (isRowUnpaid) tr.classList.add('row-unpaid');
 
+    // Считаем личный остаток
     const childPaid = cleanNumber(row[statusColIndex].v) || 0;
     let childSpent = 0;
     
     for (let c = 3; c < totalCols; c++) {
-      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex && row[c].green) {
+      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex && row[c].status === 'paid') {
         const num = cleanNumber(row[c].v);
         if (!isNaN(num)) childSpent += num;
       }
@@ -507,11 +480,11 @@ function renderTable() {
           }
         } else {
           const val = row[c].v;
+          const status = row[c].status;
           const num = cleanNumber(val);
           
-          // Проверка на текст (уважительная причина)
-          if (isNaN(num) && val !== '' && val != null) {
-            td.textContent = String(val);
+          if (status === 'excused') {
+            td.textContent = String(val); // Показываем текст (б/н)
             td.classList.add('excused');
           } else if (Math.abs(num) < 0.01) {
             td.textContent = '—';
@@ -525,8 +498,7 @@ function renderTable() {
             if (c === statusColIndex) {
               td.classList.add('paid'); 
             } else if (c > 2 && c !== remainingColIndex) {
-              // Если есть цифра, но не зеленая — это долг (красный)
-              if (!row[c].green) td.classList.add('cell-unpaid');
+              if (status === 'debt') td.classList.add('cell-unpaid');
             }
           }
         }
@@ -553,7 +525,7 @@ function renderStats() {
   dataRows.forEach(row => {
     collected += cleanNumber(row[statusColIndex].v) || 0;
     for (let c = 3; c < totalCols; c++) {
-      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex && row[c].green) {
+      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex && row[c].status === 'paid') {
         const val = cleanNumber(row[c].v);
         if (!isNaN(val)) {
           spent += val;
@@ -585,18 +557,14 @@ function renderStats() {
     for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
       
-      const isGreen = row[c].green;
+      const status = row[c].status;
       const val = row[c].v;
       const num = cleanNumber(val);
       
-      // Если ячейка зеленая, значит человек оплатил
-      if (isGreen) {
+      if (status === 'paid') {
         if (!isNaN(num) && num > 0) hasAnyPayment = true;
-      } else {
-        // Если ячейка не зеленая, и там цифра — это долг
-        if (!isNaN(num) && num > 0) {
-          hasDebt = true;
-        }
+      } else if (status === 'debt') {
+        if (!isNaN(num) && num > 0) hasDebt = true;
       }
     }
 
