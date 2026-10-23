@@ -47,6 +47,14 @@
   }
   .search-wrap input:focus { outline: none; border-color: var(--accent); background: var(--card); box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
   .row-count { font-size: 13px; color: var(--muted); margin-left: auto; }
+  .row-count.accountant-mode {
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 6px;
+    letter-spacing: .01em;
+  }
 
   .table-wrapper { overflow-x: auto; width: 100%; max-height: 70vh; }
   table { width: auto; min-width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -209,6 +217,10 @@
 let globalData = { dataRows: [], headerRow: [], numericCols: [], totalCols: 0 };
 let hasError = false;
 
+/* Секретный токен для бухгалтера. Введите его в поле поиска, чтобы увидеть всех.
+   Рекомендуется заменить на что-то своё, что невозможно случайно набрать. */
+const SECRET_TOKEN = '#all#';
+
 window.addEventListener('error', function (e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
@@ -347,8 +359,7 @@ async function init() {
     const ws = wb.worksheets[0];
     if (!ws) throw new Error('В файле нет листов');
 
-    // ИСПРАВЛЕНИЕ: единое число колонок для всех строк = ws.columnCount.
-    // Больше не будет "коротких" строк, где row[c] === undefined.
+    // Единое число колонок для всех строк, чтобы не было "коротких" строк
     const columns = Math.max(1, ws.columnCount || 1);
     const rows = [];
 
@@ -369,7 +380,6 @@ async function init() {
     parseData(rows, columns);
 
     clearTimeout(loadTimeout);
-    // ИСПРАВЛЕНИЕ: не показываем контент, если уже была показана ошибка
     if (!hasError) {
       document.getElementById('loading').hidden = true;
       document.getElementById('content').hidden = false;
@@ -430,7 +440,6 @@ function parseData(rows, totalCols) {
   renderStats();
 
   const searchInput = document.getElementById('search');
-  // Защита от дублирования слушателя, если init будет вызван повторно
   if (!searchInput.dataset.listenerAttached) {
     searchInput.addEventListener('input', filterRows);
     searchInput.dataset.listenerAttached = '1';
@@ -539,8 +548,7 @@ function renderTable() {
             td.textContent = String(row[c].v || 'б/н');
             td.classList.add('excused');
           } else if (val === 0) {
-            // ИСПРАВЛЕНИЕ: для нулевых расходов НЕ подсвечиваем розовым —
-            // ноль означает «ничего не положено», а не «долг».
+            // Нулевые расходы — не долг, просто «ничего не положено»
             td.textContent = '—';
             td.classList.add('zero');
             if (c === statusColIndex) td.classList.add('unpaid');
@@ -676,12 +684,25 @@ function renderStats() {
 }
 
 function filterRows() {
-  const q = document.getElementById('search').value.trim().toLowerCase();
+  const inputEl = document.getElementById('search');
+  const rowCountEl = document.getElementById('rowCount');
+  const q = inputEl.value.trim().toLowerCase();
   const rows = document.querySelectorAll('#tableBody tr');
+
+  // Режим бухгалтера: секретный токен — показать всех
+  if (SECRET_TOKEN && q === String(SECRET_TOKEN).toLowerCase()) {
+    rows.forEach(tr => tr.classList.remove('hidden'));
+    rowCountEl.textContent = `Все записи (${rows.length})`;
+    rowCountEl.classList.add('accountant-mode');
+    return;
+  }
+
+  // Обычный режим
+  rowCountEl.classList.remove('accountant-mode');
 
   if (q.length < 2) {
     rows.forEach(tr => tr.classList.add('hidden'));
-    document.getElementById('rowCount').textContent = 'Список скрыт';
+    rowCountEl.textContent = 'Список скрыт';
     return;
   }
 
@@ -693,7 +714,7 @@ function filterRows() {
     else { tr.classList.add('hidden'); }
   });
 
-  document.getElementById('rowCount').textContent = found > 0 ? `Найдено: ${found}` : 'Не найдено';
+  rowCountEl.textContent = found > 0 ? `Найдено: ${found}` : 'Не найдено';
 }
 
 init();
