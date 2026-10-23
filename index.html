@@ -253,25 +253,35 @@ function cleanNumber(val) {
   return isNaN(num) ? NaN : num;
 }
 
-// СТРОГАЯ проверка статуса по HEX-коду цвета
+// УМНОЕ определение статуса цвета (работает с любыми оттенками)
 function getCellStatus(cell) {
   try {
-    if (!cell || !cell.s || !cell.s.fill || !cell.s.fill.fgColor) return 'debt';
+    if (!cell || !cell.s || !cell.s.fill) return 'debt';
+    const fill = cell.s.fill;
+    if (fill.patternType === 'none') return 'debt';
     
-    // Приводим строку к верхнему регистру
-    let rgb = String(cell.s.fill.fgColor.rgb || '').toUpperCase();
-    
-    // Отрезаем альфа-канал (прозрачность), если он есть (FFC6EFCE -> C6EFCE)
-    if (rgb.length === 8 && rgb.startsWith('FF')) {
-      rgb = rgb.substring(2);
+    const fg = fill.fgColor || fill.bgColor;
+    if (!fg) return 'debt';
+
+    let rgb = String(fg.rgb || '').toUpperCase();
+    if (rgb.length === 8 && rgb.startsWith('FF')) rgb = rgb.substring(2);
+
+    if (rgb.length === 6) {
+      const r = parseInt(rgb.substring(0, 2), 16);
+      const g = parseInt(rgb.substring(2, 4), 16);
+      const b = parseInt(rgb.substring(4, 6), 16);
+
+      // 1. ЗЕЛЕНЫЙ (G доминирует)
+      if (g > r + 10 && g > b + 10) return 'paid';
+
+      // 2. ЖЕЛТЫЙ (R и G высокие, B низкий)
+      if (r > 200 && g > 200 && b < 180) return 'excused';
+
+      // 3. КРАСНЫЙ (R доминирует)
+      if (r > g + 20 && r > b + 20) return 'debt';
     }
     
-    // Строгие цвета
-    if (rgb === 'C6EFCE') return 'paid';     // Зеленый
-    if (rgb === 'FFEB9C' || rgb === 'FFFF00') return 'excused'; // Желтый
-    if (rgb === 'FFC7CE') return 'debt';     // Красный
-    
-    // Все остальное (белый, прозрачный и т.д.) - считаем долгом для безопасности
+    // Если цвет белый или нераспознанный - долг
     return 'debt';
   } catch (e) {
     return 'debt';
@@ -295,7 +305,6 @@ async function init() {
     }
 
     const buf = await resp.arrayBuffer();
-    // cellStyles: true — критически важно для чтения цветов
     const wb = XLSX.read(buf, { type: 'array', cellFormula: false, cellStyles: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
     if (!ws) throw new Error('В файле нет листов');
@@ -410,7 +419,7 @@ function renderTable() {
   for (let c = 3; c < totalCols; c++) {
     if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) totalSpent += computedTotals[c];
   }
-  // Считаем Остаток сами, игнорируя формулу Excel
+  // Считаем Остаток сами
   computedTotals[remainingColIndex] = computedTotals[statusColIndex] - totalSpent;
 
   // 2. Рендерим шапку
@@ -432,12 +441,11 @@ function renderTable() {
     theadTotals.appendChild(th);
   }
 
-  // 3. Рендерим строки детей
+  // 3. Рендерим строки
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     tr.classList.add('hidden'); 
     
-    // Подсветка всей строки (если есть хоть один долг)
     let isRowUnpaid = false;
     for (let c = 3; c < totalCols; c++) { 
       if (!numericSet.has(c) || c === remainingColIndex) continue;
@@ -451,7 +459,6 @@ function renderTable() {
     }
     if (isRowUnpaid) tr.classList.add('row-unpaid');
 
-    // Считаем личный остаток
     const childPaid = cleanNumber(row[statusColIndex].v) || 0;
     let childSpent = 0;
     
@@ -484,7 +491,7 @@ function renderTable() {
           const num = cleanNumber(val);
           
           if (status === 'excused') {
-            td.textContent = String(val); // Показываем текст (б/н)
+            td.textContent = String(val); 
             td.classList.add('excused');
           } else if (Math.abs(num) < 0.01) {
             td.textContent = '—';
