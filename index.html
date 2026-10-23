@@ -115,14 +115,17 @@
   .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; }
   .stat-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text); flex-shrink: 0; }
 
-  .progress-list { display: flex; flex-direction: column; gap: 12px; }
-  .progress-item { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
-  .progress-bar-bg { flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; margin: 0 12px; overflow: hidden;}
-  .progress-bar-fill { height: 100%; border-radius: 4px; }
-  .fill-green { background: #4ade80; }
-  .fill-yellow { background: #fcd34d; }
-  .fill-red { background: #f87171; }
+  /* Новый блок «Статус сборов» */
+  .status-list { display: flex; flex-direction: column; gap: 16px; }
+  .status-item { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-soft); padding-bottom: 12px; }
+  .status-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .status-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .status-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .status-value.green { color: var(--success); }
+  .status-value.yellow { color: #ca8a04; }
+  .status-value.red { color: var(--danger); }
 
+  /* Блок «На что потрачены деньги» */
   .price-list { display: flex; flex-direction: column; gap: 0; max-height: 400px; overflow-y: auto; padding-right: 8px; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
   .price-list::-webkit-scrollbar { width: 6px; }
   .price-list::-webkit-scrollbar-track { background: transparent; }
@@ -219,7 +222,7 @@
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-title">Статус сборов</div>
-            <div class="progress-list" id="paymentStats"></div>
+            <div class="status-list" id="paymentStats"></div>
           </div>
           <div class="stat-card">
             <div class="stat-title">На что потрачены деньги</div>
@@ -263,7 +266,7 @@ function showError(msg) {
   const el = document.getElementById('error');
   el.hidden = false;
   el.innerHTML = '<strong>Не удалось загрузить данные.</strong><br>Проверьте файлы в репозитории.<br><small></small>';
-  el.querySelector('small').textContent = msg; // textContent — безопасно от XSS
+  el.querySelector('small').textContent = msg;
 }
 
 function switchTab(tabName) {
@@ -356,13 +359,7 @@ function getCellStatus(cell) {
 }
 
 /* ==========================================================================
-   Единая точка подсчёта всех сумм.
-   Используется и в шапке таблицы, и в дашборде — расхождений быть не может.
-   Возвращает:
-     totals        — итоговые значения по каждому столбцу (с пересчитанным «Остатком»)
-     collected     — итог по столбцу «Сдали»
-     spent         — итог по расходам (без жёлтых)
-     expenseTotals — суммы по каждому столбцу расходов
+   Единая точка подсчёта всех сумм
    ========================================================================== */
 function computeTotals() {
   const { dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
@@ -379,7 +376,7 @@ function computeTotals() {
 
     for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
-      if (row[c].status === 'excused') continue; // жёлтые не считаются расходом
+      if (row[c].status === 'excused') continue;
       const val = safeParseNumber(row[c].v);
       totals[c] = round2(totals[c] + val);
       expenseTotals[c] = round2((expenseTotals[c] || 0) + val);
@@ -422,7 +419,6 @@ async function init() {
     const ws = wb.worksheets[0];
     if (!ws) throw new Error('В файле нет листов');
 
-    // Все строки выравниваем по одному числу столбцов — не бывает «коротких» строк
     const columns = Math.max(1, ws.columnCount || 0);
     const rows = [];
 
@@ -482,10 +478,7 @@ function parseData(rows, totalCols) {
     if (!name) continue;
 
     const lower = name.toLowerCase();
-    // Отсекаем итоговые строки («Итог», «Итого по классу», «Всего», «Общий»)
     if (lower.startsWith('итог') || lower === 'всего' || lower === 'общий') continue;
-
-    // Имя ребёнка обязано содержать буквы (отсекает «—», «5», пустые артефакты)
     if (!/[а-яёa-z]/i.test(name)) continue;
 
     dataRows.push(r);
@@ -532,7 +525,6 @@ function renderTable() {
   theadTotals.innerHTML = '';
   tbody.innerHTML = '';
 
-  // Шапка
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
@@ -548,14 +540,12 @@ function renderTable() {
     theadTotals.appendChild(th);
   }
 
-  // Строки
   const fragment = document.createDocumentFragment();
 
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     tr.classList.add('hidden');
 
-    // Есть ли в строке хоть один долг (для подсветки всей строки)
     let isRowUnpaid = false;
     for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c) || c === remainingColIndex) continue;
@@ -566,7 +556,6 @@ function renderTable() {
     }
     if (isRowUnpaid) tr.classList.add('row-unpaid');
 
-    // Личный остаток ребёнка (без жёлтых)
     const childPaid = safeParseNumber(row[statusColIndex].v);
     let childSpent = 0;
     for (let c = 3; c < totalCols; c++) {
@@ -671,20 +660,17 @@ function renderStats() {
   });
 
   document.getElementById('paymentStats').innerHTML = `
-    <div class="progress-item">
-      <span>Сдали всё</span>
-      <div class="progress-bar-bg"><div class="progress-bar-fill fill-green" style="width: ${(fullyPaid / studentsCount) * 100}%"></div></div>
-      <strong>${fullyPaid} чел.</strong>
+    <div class="status-item">
+      <span class="status-label">Сдали всё</span>
+      <span class="status-value green">${fullyPaid} чел.</span>
     </div>
-    <div class="progress-item">
-      <span>Сдали частично</span>
-      <div class="progress-bar-bg"><div class="progress-bar-fill fill-yellow" style="width: ${(partiallyPaid / studentsCount) * 100}%"></div></div>
-      <strong>${partiallyPaid} чел.</strong>
+    <div class="status-item">
+      <span class="status-label">Сдали частично</span>
+      <span class="status-value yellow">${partiallyPaid} чел.</span>
     </div>
-    <div class="progress-item">
-      <span>Пока не сдавали</span>
-      <div class="progress-bar-bg"><div class="progress-bar-fill fill-red" style="width: ${(notPaid / studentsCount) * 100}%"></div></div>
-      <strong>${notPaid} чел.</strong>
+    <div class="status-item">
+      <span class="status-label">Пока не сдавали</span>
+      <span class="status-value red">${notPaid} чел.</span>
     </div>
   `;
 
@@ -728,7 +714,6 @@ function filterRows() {
   const rowCountEl = document.getElementById('rowCount');
   const rows = document.querySelectorAll('#tableBody tr');
 
-  // Режим бухгалтера: секретный токен — показать всех
   if (SECRET_TOKEN && q === SECRET_TOKEN.toLowerCase()) {
     rows.forEach(tr => tr.classList.remove('hidden'));
     rowCountEl.textContent = `Все записи (${rows.length})`;
