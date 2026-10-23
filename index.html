@@ -75,7 +75,6 @@
   td.unpaid { color: var(--danger); font-weight: 600; }
   td.excused { color: #8b5cf6 !important; font-weight: 600; font-size: 13px; }
 
-  /* Дашборд */
   .dashboard-section { padding: 24px; }
   .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); }
@@ -98,16 +97,10 @@
   .fill-yellow { background: #fcd34d; }
   .fill-red { background: #f87171; }
 
-  /* Стилизация списка расходов с ограничением высоты и прокруткой */
   .price-list { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 0; 
-    max-height: 400px;
-    overflow-y: auto; 
-    padding-right: 8px;
+    display: flex; flex-direction: column; gap: 0; 
+    max-height: 400px; overflow-y: auto; padding-right: 8px;
   }
-  
   .price-list::-webkit-scrollbar { width: 6px; }
   .price-list::-webkit-scrollbar-track { background: transparent; }
   .price-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -115,32 +108,19 @@
   .price-list { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
 
   .price-item { 
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center;
-    font-size: 14px; 
-    padding: 12px 0; 
-    border-bottom: 1px solid var(--border-soft); 
-    gap: 16px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); gap: 16px;
   }
   .price-item:first-child { padding-top: 0; }
   .price-item:last-child { border-bottom: none; padding-bottom: 0; }
   
   .price-name { 
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-    color: var(--muted); 
-    line-height: 1.4; 
-    flex: 1;
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); line-height: 1.4; flex: 1;
   }
   .price-amount { 
-    font-size: 15px;
-    font-weight: 700; 
-    color: var(--success); 
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
+    font-size: 15px; font-weight: 700; color: var(--success); 
+    white-space: nowrap; font-variant-numeric: tabular-nums;
   }
 
   .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--muted); gap: 16px; }
@@ -269,7 +249,6 @@ function showError(msg) {
 function switchTab(tabName) {
   document.getElementById('tab-students').hidden = true;
   document.getElementById('tab-stats').hidden = true;
-  
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
   
   if (tabName === 'students') {
@@ -289,6 +268,35 @@ function cleanNumber(val) {
   return isNaN(num) ? NaN : num;
 }
 
+// Надежное определение зеленого цвета (с защитой от ошибок)
+function isGreenColor(cell) {
+  try {
+    if (!cell || !cell.s || !cell.s.fill) return false;
+    const fill = cell.s.fill;
+    const fg = fill.fgColor || fill.bgColor;
+    
+    if (fg && fg.rgb) {
+      const rgb = String(fg.rgb).toUpperCase();
+      if (rgb.startsWith('FF') && rgb.length === 8) {
+        const r = parseInt(rgb.substring(2, 4), 16);
+        const g = parseInt(rgb.substring(4, 6), 16);
+        const b = parseInt(rgb.substring(6, 8), 16);
+        // Зеленый канал должен доминировать
+        return g > 100 && g > r * 1.2 && g > b * 1.2;
+      }
+    }
+    // Если цвет задан через тему (theme), но он явно не белый и не пустой
+    if (fg && fg.theme !== undefined) {
+       // В темах Excel зеленый обычно имеет индекс 4, 5, 6, 7, 8, 9 (зависит от палитры)
+       // Для надежности, если это не 0 и не 1 (обычно белый/черный), можно пропустить, 
+       // но лучше довериться RGB. Если RGB нет, считаем что не зеленый (перестраховка для кассы).
+    }
+  } catch (e) {
+    console.warn('Ошибка при чтении цвета ячейки', e);
+  }
+  return false;
+}
+
 async function init() {
   abortController = new AbortController();
   try {
@@ -306,12 +314,38 @@ async function init() {
     }
 
     const buf = await resp.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array', cellFormula: false });
+    // cellStyles: true — критически важно для чтения цветов
+    const wb = XLSX.read(buf, { type: 'array', cellFormula: false, cellStyles: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
     if (!ws) throw new Error('В файле нет листов');
 
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, blankrows: true });
-    parseData(rows);
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    let maxCols = range.e.c + 1;
+    
+    // Обрезаем пустые столбцы справа, если они есть
+    while (maxCols > 1) {
+      let isEmpty = true;
+      for (let r = 0; r <= range.e.r; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: r, c: maxCols - 1 })];
+        if (cell && cell.v !== undefined && cell.v !== '') { isEmpty = false; break; }
+      }
+      if (isEmpty) maxCols--; else break;
+    }
+
+    const rows = [];
+    for (let r = 0; r <= range.e.r; r++) {
+      const row = [];
+      for (let c = 0; c < maxCols; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: r, c: c })];
+        row.push({
+          v: cell ? cell.v : '',
+          green: isGreenColor(cell)
+        });
+      }
+      rows.push(row);
+    }
+
+    parseData(rows, maxCols);
     
     clearTimeout(loadTimeout);
     document.getElementById('loading').hidden = true;
@@ -323,25 +357,32 @@ async function init() {
   }
 }
 
-function parseData(rows) {
+function parseData(rows, totalCols) {
   if (!rows || rows.length === 0) throw new Error('Файл пуст.');
 
-  let headerRow = rows[0] || [];
-  let totalCols = headerRow.length;
-  while (totalCols > 0 && (!headerRow[totalCols - 1] || String(headerRow[totalCols - 1]).trim() === '')) totalCols--;
-  if (totalCols === 0) totalCols = Math.max(headerRow.length, ...rows.map(r => (r || []).length));
-
+  const headerRow = rows[0].map(c => c.v);
   const dataRows = [];
+  let statusColIndex = 1; // По умолчанию второй столбец (Сдали)
+  let remainingColIndex = 2; // По умолчанию третий (Остаток)
+
+  // Ищем точные индексы столбцов
+  headerRow.forEach((title, idx) => {
+    const t = String(title || '').toLowerCase();
+    if (t.includes('сдал') || t.includes('оплата') || t.includes('взнос')) statusColIndex = idx;
+    if (t.includes('остаток') || t.includes('долг')) remainingColIndex = idx;
+  });
 
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.length === 0) continue;
-    const firstCol = String(r[0] || '').trim().toLowerCase();
     
-    if (firstCol.includes('итог') || firstCol.includes('общий') || firstCol.includes('всего')) continue;
-    if (firstCol === '' && r.some(c => typeof c === 'number')) continue;
+    const firstColVal = String(r[0].v || '').trim();
+    const firstColLower = firstColVal.toLowerCase();
     
-    if (firstCol !== '' && /[a-zA-Zа-яА-Я]/.test(firstCol)) { 
+    if (firstColLower.includes('итог') || firstColLower.includes('общий') || firstColLower.includes('всего')) continue;
+    if (firstColVal === '' && r.some(c => typeof c.v === 'number')) continue;
+    
+    if (firstColVal !== '' && /[a-zA-Zа-яА-Я]/.test(firstColVal)) { 
       dataRows.push(r); 
     }
   }
@@ -350,10 +391,14 @@ function parseData(rows) {
 
   const numericCols = [];
   for (let c = 1; c < totalCols; c++) { 
-    if (isNumericColumn(dataRows, c)) numericCols.push(c); 
+    let hasNum = false;
+    for (const row of dataRows) {
+      if (typeof row[c].v === 'number') { hasNum = true; break; }
+    }
+    if (hasNum) numericCols.push(c); 
   }
 
-  globalData = { dataRows, headerRow, numericCols, totalCols };
+  globalData = { dataRows, headerRow, numericCols, totalCols, statusColIndex, remainingColIndex };
 
   renderTable();
   renderStats();
@@ -362,19 +407,8 @@ function parseData(rows) {
   filterRows();
 }
 
-function isNumericColumn(rows, colIndex) {
-  let numCount = 0, validCount = 0;
-  for (const row of rows) {
-    const val = row[colIndex];
-    if (val === '' || val == null) continue;
-    validCount++;
-    if (!isNaN(cleanNumber(val))) numCount++;
-  }
-  return validCount > 0 && (numCount / validCount) >= 0.3;
-}
-
 function renderTable() {
-  const { headerRow, dataRows, numericCols, totalCols } = globalData;
+  const { headerRow, dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
   const theadMain = document.getElementById('tableHead');
   const theadTotals = document.getElementById('tableHeadTotals');
   const tbody = document.getElementById('tableBody');
@@ -386,22 +420,28 @@ function renderTable() {
 
   const computedTotals = new Array(totalCols).fill(0);
   
+  // 1. Считаем ИТОГИ
   dataRows.forEach(row => {
-    computedTotals[1] += cleanNumber(row[1]) || 0;
+    computedTotals[statusColIndex] += cleanNumber(row[statusColIndex].v) || 0;
+    
     for (let c = 3; c < totalCols; c++) {
-      if (numericSet.has(c)) {
-        const val = cleanNumber(row[c]);
-        if (!isNaN(val)) computedTotals[c] += val;
+      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) {
+        // В кассу берем ТОЛЬКО зеленые ячейки
+        if (row[c].green) {
+          const val = cleanNumber(row[c].v);
+          if (!isNaN(val)) computedTotals[c] += val;
+        }
       }
     }
   });
   
   let totalSpent = 0;
   for (let c = 3; c < totalCols; c++) {
-    if (numericSet.has(c)) totalSpent += computedTotals[c];
+    if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) totalSpent += computedTotals[c];
   }
-  computedTotals[2] = computedTotals[1] - totalSpent;
+  computedTotals[remainingColIndex] = computedTotals[statusColIndex] - totalSpent;
 
+  // 2. Рендерим шапку
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
@@ -420,26 +460,31 @@ function renderTable() {
     theadTotals.appendChild(th);
   }
 
+  // 3. Рендерим строки
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     tr.classList.add('hidden'); 
     
-    // Проверка на долги (для подсветки строки)
     let isRowUnpaid = false;
     for (let c = 3; c < totalCols; c++) { 
-      if (!numericSet.has(c)) continue;
-      const val = row[c];
-      if (val === '' || val == null) { isRowUnpaid = true; continue; }
+      if (!numericSet.has(c) || c === remainingColIndex) continue;
+      const val = row[c].v;
+      const isGreen = row[c].green;
       const num = cleanNumber(val);
-      if (!isNaN(num) && Math.abs(num) < 0.01) isRowUnpaid = true;
+      
+      // Если есть цифра, но ячейка НЕ зеленая — это долг
+      if (!isGreen && !isNaN(num) && Math.abs(num) >= 0.01) {
+        isRowUnpaid = true;
+      }
     }
     if (isRowUnpaid) tr.classList.add('row-unpaid');
 
-    const childPaid = cleanNumber(row[1]) || 0;
+    const childPaid = cleanNumber(row[statusColIndex].v) || 0;
     let childSpent = 0;
+    
     for (let c = 3; c < totalCols; c++) {
-      if (numericSet.has(c)) {
-        const num = cleanNumber(row[c]);
+      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex && row[c].green) {
+        const num = cleanNumber(row[c].v);
         if (!isNaN(num)) childSpent += num;
       }
     }
@@ -452,7 +497,7 @@ function renderTable() {
       if (isNum) {
         td.classList.add('num');
         
-        if (c === 2) {
+        if (c === remainingColIndex) {
           if (Math.abs(childBalance) < 0.01) {
             td.textContent = '—';
             td.classList.add('zero');
@@ -461,29 +506,32 @@ function renderTable() {
             if (childBalance < 0) td.classList.add('negative');
           }
         } else {
-          const val = row[c];
+          const val = row[c].v;
           const num = cleanNumber(val);
           
-          if (isNaN(num)) {
-            const s = val === '' || val == null ? '—' : String(val);
-            td.textContent = s;
-            if (s === '—') td.classList.add('zero');
-            else td.classList.add('excused');
+          // Проверка на текст (уважительная причина)
+          if (isNaN(num) && val !== '' && val != null) {
+            td.textContent = String(val);
+            td.classList.add('excused');
+          } else if (Math.abs(num) < 0.01) {
+            td.textContent = '—';
+            td.classList.add('zero');
+            if (c === statusColIndex) td.classList.add('unpaid'); 
+            else if (c > 2 && c !== remainingColIndex) td.classList.add('cell-unpaid'); 
           } else {
-            if (Math.abs(num) < 0.01) {
-              td.textContent = '—';
-              td.classList.add('zero');
-              if (c === 1) td.classList.add('unpaid'); 
-              else if (c > 2) td.classList.add('cell-unpaid'); 
-            } else {
-              td.textContent = formatNumber(num);
-              if (num < 0) td.classList.add('negative');
-              if (c === 1) td.classList.add('paid'); 
+            td.textContent = formatNumber(num);
+            if (num < 0) td.classList.add('negative');
+            
+            if (c === statusColIndex) {
+              td.classList.add('paid'); 
+            } else if (c > 2 && c !== remainingColIndex) {
+              // Если есть цифра, но не зеленая — это долг (красный)
+              if (!row[c].green) td.classList.add('cell-unpaid');
             }
           }
         }
       } else {
-        const s = row[c] === '' || row[c] == null ? '—' : String(row[c]);
+        const s = row[c].v === '' || row[c].v == null ? '—' : String(row[c].v);
         td.textContent = s;
         if (s === '—') td.classList.add('zero');
       }
@@ -494,7 +542,7 @@ function renderTable() {
 }
 
 function renderStats() {
-  const { headerRow, dataRows, numericCols, totalCols } = globalData;
+  const { headerRow, dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
   const numericSet = new Set(numericCols);
   const studentsCount = dataRows.length;
 
@@ -503,10 +551,10 @@ function renderStats() {
   const expenseTotals = {};
 
   dataRows.forEach(row => {
-    collected += cleanNumber(row[1]) || 0;
+    collected += cleanNumber(row[statusColIndex].v) || 0;
     for (let c = 3; c < totalCols; c++) {
-      if (numericSet.has(c)) {
-        const val = cleanNumber(row[c]);
+      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex && row[c].green) {
+        const val = cleanNumber(row[c].v);
         if (!isNaN(val)) {
           spent += val;
           expenseTotals[c] = (expenseTotals[c] || 0) + val;
@@ -531,44 +579,33 @@ function renderStats() {
     let hasAnyPayment = false;
     let hasDebt = false;
     
-    // Проверяем столбец "Сдали" (общий взнос)
-    const generalPaid = cleanNumber(row[1]) || 0;
+    const generalPaid = cleanNumber(row[statusColIndex].v) || 0;
     if (generalPaid > 0) hasAnyPayment = true;
 
-    // Проверяем столбцы расходов
     for (let c = 3; c < totalCols; c++) {
-      if (!numericSet.has(c)) continue;
+      if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
       
-      const val = row[c];
-      // Если пусто или null — это долг
-      if (val === '' || val == null) {
-        hasDebt = true;
-        continue;
-      }
-      
+      const isGreen = row[c].green;
+      const val = row[c].v;
       const num = cleanNumber(val);
-      // Если текст (уваж) — это НЕ долг, просто игнорируем
-      if (isNaN(num)) {
-        continue;
-      }
       
-      // Если ноль — это долг
-      if (Math.abs(num) < 0.01) {
-        hasDebt = true;
-      } 
-      // Если больше нуля — это оплата
-      else if (num > 0) {
-        hasAnyPayment = true;
+      // Если ячейка зеленая, значит человек оплатил
+      if (isGreen) {
+        if (!isNaN(num) && num > 0) hasAnyPayment = true;
+      } else {
+        // Если ячейка не зеленая, и там цифра — это долг
+        if (!isNaN(num) && num > 0) {
+          hasDebt = true;
+        }
       }
     }
 
-    // Распределяем по категориям
     if (!hasDebt) {
-      fullyPaid++; // Нет долгов (все либо оплачено, либо стоит "уваж")
+      fullyPaid++;
     } else if (hasAnyPayment) {
-      partiallyPaid++; // Что-то оплачено, но есть долги
+      partiallyPaid++;
     } else {
-      notPaid++; // Ничего не оплачено
+      notPaid++;
     }
   });
 
@@ -595,7 +632,7 @@ function renderStats() {
   
   let hasExpenses = false;
   for (let c = 3; c < totalCols; c++) {
-    if (!numericSet.has(c)) continue;
+    if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
     const totalAmount = expenseTotals[c] || 0;
     if (totalAmount > 0) {
       hasExpenses = true;
