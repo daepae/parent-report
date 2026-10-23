@@ -4,7 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Отчёт родительского комитета</title>
-<script src="xlsx.full.min.js"></script>
+<!--
+  Требуется файл exceljs.min.js рядом с index.html.
+  Скачать: https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js
+  Либо замените строку ниже на:
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+-->
+<script src="exceljs.min.js"></script>
 <style>
   :root {
     --bg: #f8fafc; --card: #fff; --text: #0f172a; --muted: #64748b;
@@ -22,7 +28,7 @@
     font-size: 14px; line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-  
+
   [hidden] { display: none !important; }
 
   .container { width: 100%; max-width: 100%; margin: 0 auto; padding: 24px 32px 48px; }
@@ -36,7 +42,7 @@
   .tab-btn.active { background: var(--accent); color: #fff; }
 
   .table-section, .dashboard-section { background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; }
-  
+
   .toolbar { padding: 16px 20px; border-bottom: 1px solid var(--border-soft); }
   .search-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .search-wrap { position: relative; flex: 1; min-width: 250px; max-width: 500px; }
@@ -51,7 +57,7 @@
 
   .table-wrapper { overflow-x: auto; width: 100%; max-height: 70vh; }
   table { width: auto; min-width: 100%; border-collapse: collapse; font-size: 14px; }
-  
+
   thead { position: sticky; top: 0; z-index: 10; }
   th { background: #f8fafc; color: var(--muted); font-weight: 600; text-align: left; padding: 12px 16px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none; }
   #tableHeadTotals th { background: #f1f5f9; color: var(--text); font-weight: 700; text-transform: none; font-size: 14px; padding: 10px 16px; border-bottom: 2px solid var(--border); }
@@ -87,12 +93,12 @@
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
   .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; }
   .stat-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text); flex-shrink: 0; }
-  
+
   .progress-list { display: flex; flex-direction: column; gap: 12px; }
   .progress-item { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
   .progress-bar-bg { flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; margin: 0 12px; overflow: hidden;}
   .progress-bar-fill { height: 100%; border-radius: 4px; }
-  
+
   .fill-green { background: #4ade80; }
   .fill-yellow { background: #fcd34d; }
   .fill-red { background: #f87171; }
@@ -207,12 +213,21 @@
 </div>
 
 <script>
+/* ==========================================================================
+   Глобальное состояние
+   ========================================================================== */
 let globalData = { dataRows: [], headerRow: [], numericCols: [], totalCols: 0 };
 
-window.addEventListener('error', function(e) {
+// Установите true для отладки цветов заливки (смотрите консоль браузера)
+const DEBUG_COLORS = false;
+
+/* ==========================================================================
+   Обработчики ошибок и таймаут загрузки
+   ========================================================================== */
+window.addEventListener('error', function (e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
-window.addEventListener('unhandledrejection', function(e) {
+window.addEventListener('unhandledrejection', function (e) {
   showError('Ошибка загрузки: ' + (e.reason?.message || e.reason || 'неизвестная ошибка'));
 });
 
@@ -231,11 +246,14 @@ function showError(msg) {
   el.innerHTML = `<strong>Не удалось загрузить данные.</strong><br>Проверьте файлы в репозитории.<br><small>${msg}</small>`;
 }
 
+/* ==========================================================================
+   Переключение вкладок
+   ========================================================================== */
 function switchTab(tabName) {
   document.getElementById('tab-students').hidden = true;
   document.getElementById('tab-stats').hidden = true;
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-  
+
   if (tabName === 'students') {
     document.getElementById('tab-students').hidden = false;
     document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
@@ -245,54 +263,107 @@ function switchTab(tabName) {
   }
 }
 
+/* ==========================================================================
+   Парсинг чисел и извлечение значений из ячеек ExcelJS
+   ========================================================================== */
 function cleanNumber(val) {
   if (typeof val === 'number') return val;
   if (val === null || val === undefined || val === '') return NaN;
+  if (val instanceof Date) return NaN;
   const str = String(val).replace(/[\s\u00A0]/g, '').replace(',', '.');
   const num = parseFloat(str);
   return isNaN(num) ? NaN : num;
 }
 
-// УМНОЕ определение статуса цвета (работает с любыми оттенками)
+// ExcelJS возвращает в cell.value одно из:
+//   - примитив (число/строка/boolean/Date)
+//   - { formula, result } — формула с вычисленным результатом
+//   - { sharedFormula, result } — общая формула
+//   - { richText: [{text}] } — форматированный текст
+//   - { text, hyperlink } — гиперссылка
+//   - { error } — ошибочная формула
+//   - null — пустая ячейка
+// Разворачиваем всё в простое значение.
+function extractCellValue(v) {
+  if (v === null || v === undefined) return '';
+  const t = typeof v;
+  if (t === 'number' || t === 'string' || t === 'boolean') return v;
+  if (v instanceof Date) return v;
+
+  if (v.richText) {
+    return v.richText.map(function (r) { return r.text || ''; }).join('');
+  }
+
+  if ('result' in v) {
+    const r = v.result;
+    if (r === null || r === undefined) return '';
+    if (typeof r === 'object') {
+      if (r.error) return '';
+      if (r.richText) return r.richText.map(x => x.text || '').join('');
+    }
+    return r;
+  }
+
+  if ('error' in v) return '';
+  if ('text' in v) return v.text;
+
+  return '';
+}
+
+/* ==========================================================================
+   Определение статуса по цвету заливки (ExcelJS)
+   ========================================================================== */
 function getCellStatus(cell) {
   try {
-    if (!cell || !cell.s || !cell.s.fill) return 'debt';
-    const fill = cell.s.fill;
-    if (fill.patternType === 'none') return 'debt';
-    
-    const fg = fill.fgColor || fill.bgColor;
+    const fill = cell.fill;
+    if (!fill) return 'debt';
+    if (fill.type !== 'pattern') return 'debt';
+    if (fill.pattern !== 'solid') return 'debt'; // 'gray125', 'none' и т.п. — без статуса
+
+    const fg = fill.fgColor;
     if (!fg) return 'debt';
 
-    let rgb = String(fg.rgb || '').toUpperCase();
+    let rgb = '';
+
+    // 1) Прямой ARGB (обычно с альфа-каналом: "FFC6EFCE")
+    if (fg.argb) rgb = String(fg.argb).toUpperCase();
+
+    // 2) Indexed-цвета: 42 = Good (green), 43 = Neutral (yellow), 44 = Bad (red)
+    if (!rgb && fg.indexed !== undefined) {
+      const indexedMap = { 42: 'C6EFCE', 43: 'FFEB9C', 44: 'FFC7CE' };
+      rgb = indexedMap[fg.indexed] || '';
+    }
+
+    if (DEBUG_COLORS) {
+      console.log('[color]', cell.address, 'fill=', fill.pattern, 'fg=', fg, '→', rgb || '(none)');
+    }
+
+    if (!rgb) return 'debt';
+
+    // Отрезаем альфа-канал
     if (rgb.length === 8 && rgb.startsWith('FF')) rgb = rgb.substring(2);
 
-    if (rgb.length === 6) {
-      const r = parseInt(rgb.substring(0, 2), 16);
-      const g = parseInt(rgb.substring(2, 4), 16);
-      const b = parseInt(rgb.substring(4, 6), 16);
+    if (rgb === 'C6EFCE') return 'paid';                              // зелёный
+    if (rgb === 'FFEB9C' || rgb === 'FFFF00') return 'excused';       // жёлтый
+    if (rgb === 'FFC7CE') return 'debt';                              // красный
 
-      // 1. ЗЕЛЕНЫЙ (G доминирует)
-      if (g > r + 10 && g > b + 10) return 'paid';
-
-      // 2. ЖЕЛТЫЙ (R и G высокие, B низкий)
-      if (r > 200 && g > 200 && b < 180) return 'excused';
-
-      // 3. КРАСНЫЙ (R доминирует)
-      if (r > g + 20 && r > b + 20) return 'debt';
-    }
-    
-    // Если цвет белый или нераспознанный - долг
+    // Всё остальное (белый, тема, нестандартный цвет) — считаем долгом
     return 'debt';
   } catch (e) {
     return 'debt';
   }
 }
 
+/* ==========================================================================
+   Загрузка xlsx через ExcelJS
+   ========================================================================== */
 async function init() {
   abortController = new AbortController();
   try {
-    if (typeof XLSX === 'undefined') throw new Error('Библиотека xlsx.full.min.js не найдена.');
-    
+    if (typeof ExcelJS === 'undefined') {
+      throw new Error('Библиотека exceljs.min.js не найдена. Скачайте её рядом с index.html.');
+    }
+
     const resp = await fetch('data.xlsx', { cache: 'no-store', signal: abortController.signal });
     if (!resp.ok) throw new Error('Файл не найден (HTTP ' + resp.status + ')');
 
@@ -305,45 +376,50 @@ async function init() {
     }
 
     const buf = await resp.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array', cellFormula: false, cellStyles: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const ws = wb.worksheets[0];
     if (!ws) throw new Error('В файле нет листов');
 
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    let maxCols = range.e.c + 1;
+    const totalCols = ws.columnCount || 1;
+    const totalRows = ws.rowCount || 1;
 
     const rows = [];
-    for (let r = 0; r <= range.e.r; r++) {
-      const row = [];
-      for (let c = 0; c < maxCols; c++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: r, c: c })];
-        row.push({
-          v: cell ? cell.v : '',
+    for (let r = 1; r <= totalRows; r++) {
+      const row = ws.getRow(r);
+      const cells = [];
+      for (let c = 1; c <= totalCols; c++) {
+        const cell = row.getCell(c);
+        cells.push({
+          v: extractCellValue(cell.value),
           status: getCellStatus(cell)
         });
       }
-      rows.push(row);
+      rows.push(cells);
     }
 
-    parseData(rows, maxCols);
-    
+    parseData(rows, totalCols);
+
     clearTimeout(loadTimeout);
     document.getElementById('loading').hidden = true;
     document.getElementById('content').hidden = false;
   } catch (e) {
-    if (e.name === 'AbortError') return; 
+    if (e.name === 'AbortError') return;
     if (e.message === 'Failed to fetch') showError('Нет подключения к интернету. Проверьте сеть.');
     else showError(e.message);
   }
 }
 
+/* ==========================================================================
+   Парсинг данных: поиск колонок «Сдали» и «Остаток»
+   ========================================================================== */
 function parseData(rows, totalCols) {
   if (!rows || rows.length === 0) throw new Error('Файл пуст.');
 
   const headerRow = rows[0].map(c => c.v);
   const dataRows = [];
-  let statusColIndex = 1;
-  let remainingColIndex = 2;
+  let statusColIndex = -1;
+  let remainingColIndex = -1;
 
   // Ищем столбцы по названиям
   headerRow.forEach((title, idx) => {
@@ -352,30 +428,40 @@ function parseData(rows, totalCols) {
     if (t.includes('остаток') || t.includes('долг')) remainingColIndex = idx;
   });
 
+  if (statusColIndex === -1) {
+    throw new Error('В шапке не найден столбец «Сдали» / «Оплата» / «Взнос». Проверьте первую строку data.xlsx.');
+  }
+  if (remainingColIndex === -1) {
+    throw new Error('В шапке не найден столбец «Остаток» / «Долг». Проверьте первую строку data.xlsx.');
+  }
+
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.length === 0) continue;
-    
+
     const firstColVal = String(r[0].v || '').trim();
     const firstColLower = firstColVal.toLowerCase();
-    
+
+    // Пропускаем строку итогов
     if (firstColLower.includes('итог') || firstColLower.includes('общий') || firstColLower.includes('всего')) continue;
+    // Пропускаем строки без имени, но с числами (защита от неподписанных итогов)
     if (firstColVal === '' && r.some(c => typeof c.v === 'number')) continue;
-    
-    if (firstColVal !== '' && /[a-zA-Zа-яА-Я]/.test(firstColVal)) { 
-      dataRows.push(r); 
+
+    if (firstColVal !== '' && /[a-zA-Zа-яА-Я]/.test(firstColVal)) {
+      dataRows.push(r);
     }
   }
 
   if (dataRows.length === 0) throw new Error('Не найдено строк с именами детей.');
 
+  // Числовые колонки — те, в которых хотя бы у одного ребёнка есть число
   const numericCols = [];
-  for (let c = 1; c < totalCols; c++) { 
+  for (let c = 1; c < totalCols; c++) {
     let hasNum = false;
     for (const row of dataRows) {
       if (typeof row[c].v === 'number') { hasNum = true; break; }
     }
-    if (hasNum) numericCols.push(c); 
+    if (hasNum) numericCols.push(c);
   }
 
   globalData = { dataRows, headerRow, numericCols, totalCols, statusColIndex, remainingColIndex };
@@ -387,6 +473,9 @@ function parseData(rows, totalCols) {
   filterRows();
 }
 
+/* ==========================================================================
+   Отрисовка таблицы
+   ========================================================================== */
 function renderTable() {
   const { headerRow, dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
   const theadMain = document.getElementById('tableHead');
@@ -399,14 +488,13 @@ function renderTable() {
   tbody.innerHTML = '';
 
   const computedTotals = new Array(totalCols).fill(0);
-  
-  // 1. Считаем ИТОГИ
+
+  // 1. Считаем ИТОГИ: «Сдали» полностью + расходы только по «зелёным» (paid) ячейкам
   dataRows.forEach(row => {
     computedTotals[statusColIndex] += cleanNumber(row[statusColIndex].v) || 0;
-    
+
     for (let c = 3; c < totalCols; c++) {
       if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) {
-        // В кассу берем ТОЛЬКО зеленые ячейки
         if (row[c].status === 'paid') {
           const val = cleanNumber(row[c].v);
           if (!isNaN(val)) computedTotals[c] += val;
@@ -414,15 +502,15 @@ function renderTable() {
       }
     }
   });
-  
+
   let totalSpent = 0;
   for (let c = 3; c < totalCols; c++) {
     if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) totalSpent += computedTotals[c];
   }
-  // Считаем Остаток сами
+  // «Остаток» пересчитываем сами, игнорируя формулу Excel
   computedTotals[remainingColIndex] = computedTotals[statusColIndex] - totalSpent;
 
-  // 2. Рендерим шапку
+  // 2. Шапка
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
@@ -441,27 +529,26 @@ function renderTable() {
     theadTotals.appendChild(th);
   }
 
-  // 3. Рендерим строки
+  // 3. Строки детей
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
-    tr.classList.add('hidden'); 
-    
+    tr.classList.add('hidden');
+
+    // Подсветка строки, если есть хоть один непогашенный долг
     let isRowUnpaid = false;
-    for (let c = 3; c < totalCols; c++) { 
+    for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c) || c === remainingColIndex) continue;
-      const val = row[c].v;
       const status = row[c].status;
-      const num = cleanNumber(val);
-      
+      const num = cleanNumber(row[c].v);
       if (status === 'debt' && !isNaN(num) && Math.abs(num) >= 0.01) {
         isRowUnpaid = true;
       }
     }
     if (isRowUnpaid) tr.classList.add('row-unpaid');
 
+    // Личный остаток = Сдали − расходы (только «зелёные»)
     const childPaid = cleanNumber(row[statusColIndex].v) || 0;
     let childSpent = 0;
-    
     for (let c = 3; c < totalCols; c++) {
       if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex && row[c].status === 'paid') {
         const num = cleanNumber(row[c].v);
@@ -476,7 +563,7 @@ function renderTable() {
 
       if (isNum) {
         td.classList.add('num');
-        
+
         if (c === remainingColIndex) {
           if (Math.abs(childBalance) < 0.01) {
             td.textContent = '—';
@@ -489,21 +576,23 @@ function renderTable() {
           const val = row[c].v;
           const status = row[c].status;
           const num = cleanNumber(val);
-          
+
           if (status === 'excused') {
-            td.textContent = String(val); 
+            // Жёлтая ячейка: показываем текст как есть (например, «б/н»)
+            td.textContent = String(val || 'б/н');
             td.classList.add('excused');
           } else if (Math.abs(num) < 0.01) {
+            // Пустое или нулевое значение
             td.textContent = '—';
             td.classList.add('zero');
-            if (c === statusColIndex) td.classList.add('unpaid'); 
-            else if (c > 2 && c !== remainingColIndex) td.classList.add('cell-unpaid'); 
+            if (c === statusColIndex) td.classList.add('unpaid');
+            else if (c > 2 && c !== remainingColIndex) td.classList.add('cell-unpaid');
           } else {
             td.textContent = formatNumber(num);
             if (num < 0) td.classList.add('negative');
-            
+
             if (c === statusColIndex) {
-              td.classList.add('paid'); 
+              td.classList.add('paid');
             } else if (c > 2 && c !== remainingColIndex) {
               if (status === 'debt') td.classList.add('cell-unpaid');
             }
@@ -520,6 +609,9 @@ function renderTable() {
   });
 }
 
+/* ==========================================================================
+   Статистика: KPI, статус сборов, расходы
+   ========================================================================== */
 function renderStats() {
   const { headerRow, dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
   const numericSet = new Set(numericCols);
@@ -541,15 +633,16 @@ function renderStats() {
       }
     }
   });
-  
+
   const balance = collected - spent;
 
   document.getElementById('kpi-collected').textContent = formatNumber(collected) + ' ₽';
   document.getElementById('kpi-spent').textContent = formatNumber(spent) + ' ₽';
-  
+
   const balanceEl = document.getElementById('kpi-balance');
   balanceEl.textContent = formatNumber(balance) + ' ₽';
-  if (balance < 0) balanceEl.classList.add('red'); else balanceEl.classList.remove('red');
+  if (balance < 0) balanceEl.classList.add('red');
+  else balanceEl.classList.remove('red');
 
   const pStatsEl = document.getElementById('paymentStats');
   let fullyPaid = 0, partiallyPaid = 0, notPaid = 0;
@@ -557,17 +650,16 @@ function renderStats() {
   dataRows.forEach(row => {
     let hasAnyPayment = false;
     let hasDebt = false;
-    
+
     const generalPaid = cleanNumber(row[statusColIndex].v) || 0;
     if (generalPaid > 0) hasAnyPayment = true;
 
     for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
-      
+
       const status = row[c].status;
-      const val = row[c].v;
-      const num = cleanNumber(val);
-      
+      const num = cleanNumber(row[c].v);
+
       if (status === 'paid') {
         if (!isNaN(num) && num > 0) hasAnyPayment = true;
       } else if (status === 'debt') {
@@ -575,48 +667,44 @@ function renderStats() {
       }
     }
 
-    if (!hasDebt) {
-      fullyPaid++;
-    } else if (hasAnyPayment) {
-      partiallyPaid++;
-    } else {
-      notPaid++;
-    }
+    if (!hasDebt) fullyPaid++;
+    else if (hasAnyPayment) partiallyPaid++;
+    else notPaid++;
   });
 
   pStatsEl.innerHTML = `
     <div class="progress-item">
       <span>Сдали всё</span>
-      <div class="progress-bar-bg"><div class="progress-bar-fill fill-green" style="width: ${(fullyPaid/studentsCount)*100}%"></div></div>
+      <div class="progress-bar-bg"><div class="progress-bar-fill fill-green" style="width: ${(fullyPaid / studentsCount) * 100}%"></div></div>
       <strong>${fullyPaid} чел.</strong>
     </div>
     <div class="progress-item">
       <span>Сдали частично</span>
-      <div class="progress-bar-bg"><div class="progress-bar-fill fill-yellow" style="width: ${(partiallyPaid/studentsCount)*100}%"></div></div>
+      <div class="progress-bar-bg"><div class="progress-bar-fill fill-yellow" style="width: ${(partiallyPaid / studentsCount) * 100}%"></div></div>
       <strong>${partiallyPaid} чел.</strong>
     </div>
     <div class="progress-item">
       <span>Пока не сдавали</span>
-      <div class="progress-bar-bg"><div class="progress-bar-fill fill-red" style="width: ${(notPaid/studentsCount)*100}%"></div></div>
+      <div class="progress-bar-bg"><div class="progress-bar-fill fill-red" style="width: ${(notPaid / studentsCount) * 100}%"></div></div>
       <strong>${notPaid} чел.</strong>
     </div>
   `;
 
   const expensesEl = document.getElementById('expensesList');
   expensesEl.innerHTML = '';
-  
+
   let hasExpenses = false;
   for (let c = 3; c < totalCols; c++) {
     if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
     const totalAmount = expenseTotals[c] || 0;
     if (totalAmount > 0) {
       hasExpenses = true;
-      const name = headerRow[c] || `Колонка ${c+1}`;
-      
+      const name = headerRow[c] || `Колонка ${c + 1}`;
+
       const div = document.createElement('div');
       div.className = 'price-item';
       div.innerHTML = `
-        <span class="price-name">${name}</span> 
+        <span class="price-name">${name}</span>
         <span class="price-amount">${formatNumber(totalAmount)} ₽</span>
       `;
       expensesEl.appendChild(div);
@@ -628,10 +716,13 @@ function renderStats() {
   }
 }
 
+/* ==========================================================================
+   Поиск по фамилии
+   ========================================================================== */
 function filterRows() {
   const q = document.getElementById('search').value.trim().toLowerCase();
   const rows = document.querySelectorAll('#tableBody tr');
-  
+
   if (q.length < 2) {
     rows.forEach(tr => tr.classList.add('hidden'));
     document.getElementById('rowCount').textContent = 'Список скрыт';
@@ -645,10 +736,13 @@ function filterRows() {
     if (isMatch) { tr.classList.remove('hidden'); found++; }
     else { tr.classList.add('hidden'); }
   });
-  
+
   document.getElementById('rowCount').textContent = found > 0 ? `Найдено: ${found}` : 'Не найдено';
 }
 
+/* ==========================================================================
+   Форматирование чисел
+   ========================================================================== */
 function formatNumber(v) {
   if (typeof v !== 'number' || !isFinite(v)) return '0';
   if (Math.abs(v) < 0.01) return '0';
