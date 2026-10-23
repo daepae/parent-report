@@ -103,17 +103,16 @@
     display: flex; 
     flex-direction: column; 
     gap: 0; 
-    max-height: 400px; /* Ограничение высоты */
-    overflow-y: auto;  /* Внутренняя прокрутка */
-    padding-right: 8px; /* Отступ, чтобы скроллбар не наезжал на текст */
+    max-height: 400px;
+    overflow-y: auto; 
+    padding-right: 8px;
   }
   
-  /* Красивый тонкий скроллбар */
   .price-list::-webkit-scrollbar { width: 6px; }
   .price-list::-webkit-scrollbar-track { background: transparent; }
   .price-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
   .price-list::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-  .price-list { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; } /* Для Firefox */
+  .price-list { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
 
   .price-item { 
     display: flex; 
@@ -425,6 +424,7 @@ function renderTable() {
     const tr = document.createElement('tr');
     tr.classList.add('hidden'); 
     
+    // Проверка на долги (для подсветки строки)
     let isRowUnpaid = false;
     for (let c = 3; c < totalCols; c++) { 
       if (!numericSet.has(c)) continue;
@@ -528,23 +528,47 @@ function renderStats() {
   let fullyPaid = 0, partiallyPaid = 0, notPaid = 0;
 
   dataRows.forEach(row => {
-    const paidAmount = cleanNumber(row[1]) || 0;
+    let hasAnyPayment = false;
     let hasDebt = false;
     
+    // Проверяем столбец "Сдали" (общий взнос)
+    const generalPaid = cleanNumber(row[1]) || 0;
+    if (generalPaid > 0) hasAnyPayment = true;
+
+    // Проверяем столбцы расходов
     for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c)) continue;
+      
       const val = row[c];
-      if (val === '' || val == null) { hasDebt = true; continue; }
+      // Если пусто или null — это долг
+      if (val === '' || val == null) {
+        hasDebt = true;
+        continue;
+      }
+      
       const num = cleanNumber(val);
-      if (!isNaN(num) && Math.abs(num) < 0.01) hasDebt = true;
+      // Если текст (уваж) — это НЕ долг, просто игнорируем
+      if (isNaN(num)) {
+        continue;
+      }
+      
+      // Если ноль — это долг
+      if (Math.abs(num) < 0.01) {
+        hasDebt = true;
+      } 
+      // Если больше нуля — это оплата
+      else if (num > 0) {
+        hasAnyPayment = true;
+      }
     }
 
-    if (Math.abs(paidAmount) < 0.01) {
-      notPaid++;
-    } else if (hasDebt) {
-      partiallyPaid++;
+    // Распределяем по категориям
+    if (!hasDebt) {
+      fullyPaid++; // Нет долгов (все либо оплачено, либо стоит "уваж")
+    } else if (hasAnyPayment) {
+      partiallyPaid++; // Что-то оплачено, но есть долги
     } else {
-      fullyPaid++;
+      notPaid++; // Ничего не оплачено
     }
   });
 
