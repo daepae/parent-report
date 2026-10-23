@@ -72,7 +72,27 @@
 
   tbody tr.row-unpaid { background-color: #fff1f2 !important; }
   tbody tr.row-unpaid:hover { background-color: #ffe4e6 !important; }
-  td.cell-unpaid { background-color: #ffe4e6; color: var(--danger) !important; font-weight: 600; }
+
+  td.cell-unpaid {
+    background-color: #fecaca;
+    color: var(--danger) !important;
+    font-weight: 700;
+    box-shadow: inset 3px 0 0 #dc2626;
+  }
+  tbody tr.row-unpaid:hover td.cell-unpaid {
+    background-color: #fca5a5;
+  }
+  td.cell-unpaid::before {
+    content: '×';
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    vertical-align: 1px;
+    margin-right: 4px;
+    color: #b91c1c;
+    opacity: 0.9;
+  }
 
   th.num, td.num { text-align: right; }
   td.num { font-variant-numeric: tabular-nums; }
@@ -99,17 +119,15 @@
   .progress-item { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
   .progress-bar-bg { flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; margin: 0 12px; overflow: hidden;}
   .progress-bar-fill { height: 100%; border-radius: 4px; }
-
   .fill-green { background: #4ade80; }
   .fill-yellow { background: #fcd34d; }
   .fill-red { background: #f87171; }
 
-  .price-list { display: flex; flex-direction: column; gap: 0; max-height: 400px; overflow-y: auto; padding-right: 8px; }
+  .price-list { display: flex; flex-direction: column; gap: 0; max-height: 400px; overflow-y: auto; padding-right: 8px; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
   .price-list::-webkit-scrollbar { width: 6px; }
   .price-list::-webkit-scrollbar-track { background: transparent; }
   .price-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
   .price-list::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-  .price-list { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
 
   .price-item { display: flex; justify-content: space-between; align-items: center; font-size: 14px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); gap: 16px; }
   .price-item:first-child { padding-top: 0; }
@@ -214,13 +232,16 @@
 </div>
 
 <script>
+/* ==========================================================================
+   Состояние и константы
+   ========================================================================== */
+const SECRET_TOKEN = '#all#';
 let globalData = { dataRows: [], headerRow: [], numericCols: [], totalCols: 0 };
 let hasError = false;
 
-/* Секретный токен для бухгалтера. Введите его в поле поиска, чтобы увидеть всех.
-   Рекомендуется заменить на что-то своё, что невозможно случайно набрать. */
-const SECRET_TOKEN = '#all#';
-
+/* ==========================================================================
+   Обработчики ошибок и таймаут
+   ========================================================================== */
 window.addEventListener('error', function (e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
@@ -241,7 +262,8 @@ function showError(msg) {
   document.getElementById('content').hidden = true;
   const el = document.getElementById('error');
   el.hidden = false;
-  el.innerHTML = `<strong>Не удалось загрузить данные.</strong><br>Проверьте файлы в репозитории.<br><small>${msg}</small>`;
+  el.innerHTML = '<strong>Не удалось загрузить данные.</strong><br>Проверьте файлы в репозитории.<br><small></small>';
+  el.querySelector('small').textContent = msg; // textContent — безопасно от XSS
 }
 
 function switchTab(tabName) {
@@ -258,6 +280,9 @@ function switchTab(tabName) {
   }
 }
 
+/* ==========================================================================
+   Утилиты
+   ========================================================================== */
 function safeParseNumber(val) {
   if (typeof val === 'number') return isFinite(val) ? val : 0;
   if (val === null || val === undefined || val === '') return 0;
@@ -283,9 +308,7 @@ function extractCellValue(v) {
   if (t === 'number' || t === 'string' || t === 'boolean') return v;
   if (v instanceof Date) return v;
 
-  if (v.richText) {
-    return v.richText.map(r => r.text || '').join('');
-  }
+  if (v.richText) return v.richText.map(r => r.text || '').join('');
 
   if ('result' in v) {
     const r = v.result;
@@ -305,7 +328,7 @@ function extractCellValue(v) {
 
 function getCellStatus(cell) {
   try {
-    const fill = cell && cell.fill;
+    const fill = cell.fill;
     if (!fill || fill.type !== 'pattern' || fill.pattern !== 'solid') return 'debt';
 
     const fg = fill.fgColor;
@@ -332,6 +355,46 @@ function getCellStatus(cell) {
   }
 }
 
+/* ==========================================================================
+   Единая точка подсчёта всех сумм.
+   Используется и в шапке таблицы, и в дашборде — расхождений быть не может.
+   Возвращает:
+     totals        — итоговые значения по каждому столбцу (с пересчитанным «Остатком»)
+     collected     — итог по столбцу «Сдали»
+     spent         — итог по расходам (без жёлтых)
+     expenseTotals — суммы по каждому столбцу расходов
+   ========================================================================== */
+function computeTotals() {
+  const { dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
+  const numericSet = new Set(numericCols);
+  const totals = new Array(totalCols).fill(0);
+  const expenseTotals = {};
+  let collected = 0;
+  let spent = 0;
+
+  dataRows.forEach(row => {
+    const paidVal = safeParseNumber(row[statusColIndex].v);
+    totals[statusColIndex] = round2(totals[statusColIndex] + paidVal);
+    collected = round2(collected + paidVal);
+
+    for (let c = 3; c < totalCols; c++) {
+      if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
+      if (row[c].status === 'excused') continue; // жёлтые не считаются расходом
+      const val = safeParseNumber(row[c].v);
+      totals[c] = round2(totals[c] + val);
+      expenseTotals[c] = round2((expenseTotals[c] || 0) + val);
+      spent = round2(spent + val);
+    }
+  });
+
+  totals[remainingColIndex] = round2(totals[statusColIndex] - spent);
+
+  return { totals, collected, spent, expenseTotals };
+}
+
+/* ==========================================================================
+   Загрузка и инициализация
+   ========================================================================== */
 async function init() {
   hasError = false;
   abortController = new AbortController();
@@ -359,8 +422,8 @@ async function init() {
     const ws = wb.worksheets[0];
     if (!ws) throw new Error('В файле нет листов');
 
-    // Единое число колонок для всех строк, чтобы не было "коротких" строк
-    const columns = Math.max(1, ws.columnCount || 1);
+    // Все строки выравниваем по одному числу столбцов — не бывает «коротких» строк
+    const columns = Math.max(1, ws.columnCount || 0);
     const rows = [];
 
     ws.eachRow({ includeEmpty: false }, (row) => {
@@ -368,8 +431,8 @@ async function init() {
       for (let c = 1; c <= columns; c++) {
         const cell = row.getCell(c);
         cells.push({
-          v: cell ? extractCellValue(cell.value) : '',
-          status: cell ? getCellStatus(cell) : 'debt'
+          v: extractCellValue(cell.value),
+          status: getCellStatus(cell)
         });
       }
       rows.push(cells);
@@ -391,6 +454,9 @@ async function init() {
   }
 }
 
+/* ==========================================================================
+   Парсинг
+   ========================================================================== */
 function parseData(rows, totalCols) {
   if (!rows || rows.length === 0) throw new Error('Файл пуст.');
 
@@ -412,12 +478,15 @@ function parseData(rows, totalCols) {
     const r = rows[i];
     if (!r || r.length === 0) continue;
 
-    const firstColVal = String(r[0].v || '').trim();
-    const lower = firstColVal.toLowerCase();
+    const name = String(r[0].v || '').trim();
+    if (!name) continue;
 
-    // Пропускаем строки итогов
-    if (lower === 'итог' || lower === 'итого' || lower === 'всего' || lower === 'общий' || lower.startsWith('итог ')) continue;
-    if (firstColVal === '') continue;
+    const lower = name.toLowerCase();
+    // Отсекаем итоговые строки («Итог», «Итого по классу», «Всего», «Общий»)
+    if (lower.startsWith('итог') || lower === 'всего' || lower === 'общий') continue;
+
+    // Имя ребёнка обязано содержать буквы (отсекает «—», «5», пустые артефакты)
+    if (!/[а-яёa-z]/i.test(name)) continue;
 
     dataRows.push(r);
   }
@@ -447,80 +516,63 @@ function parseData(rows, totalCols) {
   filterRows();
 }
 
+/* ==========================================================================
+   Отрисовка таблицы
+   ========================================================================== */
 function renderTable() {
   const { headerRow, dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
+  const numericSet = new Set(numericCols);
+  const { totals } = computeTotals();
+
   const theadMain = document.getElementById('tableHead');
   const theadTotals = document.getElementById('tableHeadTotals');
   const tbody = document.getElementById('tableBody');
-  const numericSet = new Set(numericCols);
 
   theadMain.innerHTML = '';
   theadTotals.innerHTML = '';
   tbody.innerHTML = '';
 
-  let totalSpent = 0;
-  const computedTotals = new Array(totalCols).fill(0);
-
-  dataRows.forEach(row => {
-    const paidVal = safeParseNumber(row[statusColIndex].v);
-    computedTotals[statusColIndex] = round2(computedTotals[statusColIndex] + paidVal);
-
-    for (let c = 3; c < totalCols; c++) {
-      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) {
-        // Жёлтые (уважительная причина) не учитываем в расходах
-        if (row[c].status !== 'excused') {
-          const val = safeParseNumber(row[c].v);
-          computedTotals[c] = round2(computedTotals[c] + val);
-          totalSpent = round2(totalSpent + val);
-        }
-      }
-    }
-  });
-
-  computedTotals[remainingColIndex] = round2(computedTotals[statusColIndex] - totalSpent);
-
+  // Шапка
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
     if (numericSet.has(c)) th.classList.add('num');
     theadMain.appendChild(th);
   }
-
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     if (numericSet.has(c)) {
       th.classList.add('num');
-      th.textContent = formatNumber(computedTotals[c]);
-    } else {
-      th.textContent = '';
+      th.textContent = formatNumber(totals[c]);
     }
     theadTotals.appendChild(th);
   }
 
+  // Строки
   const fragment = document.createDocumentFragment();
 
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
     tr.classList.add('hidden');
 
+    // Есть ли в строке хоть один долг (для подсветки всей строки)
     let isRowUnpaid = false;
     for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c) || c === remainingColIndex) continue;
-      const val = safeParseNumber(row[c].v);
-      if (row[c].status === 'debt' && val > 0) {
+      if (row[c].status === 'debt' && safeParseNumber(row[c].v) > 0) {
         isRowUnpaid = true;
         break;
       }
     }
     if (isRowUnpaid) tr.classList.add('row-unpaid');
 
+    // Личный остаток ребёнка (без жёлтых)
     const childPaid = safeParseNumber(row[statusColIndex].v);
     let childSpent = 0;
     for (let c = 3; c < totalCols; c++) {
-      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) {
-        if (row[c].status !== 'excused') {
-          childSpent = round2(childSpent + safeParseNumber(row[c].v));
-        }
+      if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
+      if (row[c].status !== 'excused') {
+        childSpent = round2(childSpent + safeParseNumber(row[c].v));
       }
     }
     const childBalance = round2(childPaid - childSpent);
@@ -529,45 +581,48 @@ function renderTable() {
       const td = document.createElement('td');
       const isNum = numericSet.has(c);
 
-      if (isNum) {
-        td.classList.add('num');
-
-        if (c === remainingColIndex) {
-          if (Math.abs(childBalance) < 0.01) {
-            td.textContent = '—';
-            td.classList.add('zero');
-          } else {
-            td.textContent = formatNumber(childBalance);
-            if (childBalance < 0) td.classList.add('negative');
-          }
-        } else {
-          const val = safeParseNumber(row[c].v);
-          const status = row[c].status;
-
-          if (status === 'excused') {
-            td.textContent = String(row[c].v || 'б/н');
-            td.classList.add('excused');
-          } else if (val === 0) {
-            // Нулевые расходы — не долг, просто «ничего не положено»
-            td.textContent = '—';
-            td.classList.add('zero');
-            if (c === statusColIndex) td.classList.add('unpaid');
-          } else {
-            td.textContent = formatNumber(val);
-            if (val < 0) td.classList.add('negative');
-
-            if (c === statusColIndex) {
-              td.classList.add('paid');
-            } else if (c > 2) {
-              if (status === 'debt') td.classList.add('cell-unpaid');
-            }
-          }
-        }
-      } else {
+      if (!isNum) {
         const s = row[c].v === '' || row[c].v == null ? '—' : String(row[c].v);
         td.textContent = s;
         if (s === '—') td.classList.add('zero');
+        tr.appendChild(td);
+        continue;
       }
+
+      td.classList.add('num');
+
+      if (c === remainingColIndex) {
+        if (Math.abs(childBalance) < 0.01) {
+          td.textContent = '—';
+          td.classList.add('zero');
+        } else {
+          td.textContent = formatNumber(childBalance);
+          if (childBalance < 0) td.classList.add('negative');
+        }
+        tr.appendChild(td);
+        continue;
+      }
+
+      const val = safeParseNumber(row[c].v);
+      const status = row[c].status;
+
+      if (status === 'excused') {
+        td.textContent = String(row[c].v || 'б/н');
+        td.classList.add('excused');
+      } else if (val === 0) {
+        td.textContent = '—';
+        td.classList.add('zero');
+        if (c === statusColIndex) td.classList.add('unpaid');
+      } else {
+        td.textContent = formatNumber(val);
+        if (val < 0) td.classList.add('negative');
+        if (c === statusColIndex) {
+          td.classList.add('paid');
+        } else if (c > 2 && status === 'debt') {
+          td.classList.add('cell-unpaid');
+        }
+      }
+
       tr.appendChild(td);
     }
     fragment.appendChild(tr);
@@ -576,55 +631,38 @@ function renderTable() {
   tbody.appendChild(fragment);
 }
 
+/* ==========================================================================
+   Дашборд
+   ========================================================================== */
 function renderStats() {
   const { headerRow, dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
   const numericSet = new Set(numericCols);
-  const studentsCount = Math.max(1, dataRows.length);
-
-  let collected = 0;
-  let spent = 0;
-  const expenseTotals = {};
-
-  dataRows.forEach(row => {
-    collected = round2(collected + safeParseNumber(row[statusColIndex].v));
-
-    for (let c = 3; c < totalCols; c++) {
-      if (numericSet.has(c) && c !== statusColIndex && c !== remainingColIndex) {
-        if (row[c].status !== 'excused') {
-          const val = safeParseNumber(row[c].v);
-          spent = round2(spent + val);
-          expenseTotals[c] = round2((expenseTotals[c] || 0) + val);
-        }
-      }
-    }
-  });
-
+  const { collected, spent, expenseTotals } = computeTotals();
   const balance = round2(collected - spent);
+  const studentsCount = Math.max(1, dataRows.length);
 
   document.getElementById('kpi-collected').textContent = formatNumber(collected) + ' ₽';
   document.getElementById('kpi-spent').textContent = formatNumber(spent) + ' ₽';
 
   const balanceEl = document.getElementById('kpi-balance');
   balanceEl.textContent = formatNumber(balance) + ' ₽';
-  if (balance < 0) balanceEl.classList.add('red');
-  else balanceEl.classList.remove('red');
+  balanceEl.classList.toggle('red', balance < 0);
 
-  const pStatsEl = document.getElementById('paymentStats');
+  // Статус сборов
   let fullyPaid = 0, partiallyPaid = 0, notPaid = 0;
 
   dataRows.forEach(row => {
-    let hasAnyPayment = false;
+    let hasAnyPayment = safeParseNumber(row[statusColIndex].v) > 0;
     let hasDebt = false;
-
-    if (safeParseNumber(row[statusColIndex].v) > 0) hasAnyPayment = true;
 
     for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
-      if (row[c].status === 'excused') continue; // жёлтые не формируют долг
+      if (row[c].status === 'excused') continue;
 
       const val = safeParseNumber(row[c].v);
-      if (row[c].status === 'paid' && val > 0) hasAnyPayment = true;
-      else if (row[c].status === 'debt' && val > 0) hasDebt = true;
+      if (val <= 0) continue;
+      if (row[c].status === 'paid') hasAnyPayment = true;
+      else if (row[c].status === 'debt') hasDebt = true;
     }
 
     if (!hasDebt) fullyPaid++;
@@ -632,7 +670,7 @@ function renderStats() {
     else notPaid++;
   });
 
-  pStatsEl.innerHTML = `
+  document.getElementById('paymentStats').innerHTML = `
     <div class="progress-item">
       <span>Сдали всё</span>
       <div class="progress-bar-bg"><div class="progress-bar-fill fill-green" style="width: ${(fullyPaid / studentsCount) * 100}%"></div></div>
@@ -650,32 +688,31 @@ function renderStats() {
     </div>
   `;
 
+  // Расходы по категориям
   const expensesEl = document.getElementById('expensesList');
   expensesEl.innerHTML = '';
-
   let hasExpenses = false;
+
   for (let c = 3; c < totalCols; c++) {
     if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
     const totalAmount = expenseTotals[c] || 0;
-    if (totalAmount > 0) {
-      hasExpenses = true;
-      const name = headerRow[c] || `Колонка ${c + 1}`;
+    if (totalAmount <= 0) continue;
 
-      const div = document.createElement('div');
-      div.className = 'price-item';
+    hasExpenses = true;
+    const div = document.createElement('div');
+    div.className = 'price-item';
 
-      const spanName = document.createElement('span');
-      spanName.className = 'price-name';
-      spanName.textContent = name;
+    const nameEl = document.createElement('span');
+    nameEl.className = 'price-name';
+    nameEl.textContent = headerRow[c] || `Колонка ${c + 1}`;
 
-      const spanAmount = document.createElement('span');
-      spanAmount.className = 'price-amount';
-      spanAmount.textContent = formatNumber(totalAmount) + ' ₽';
+    const amountEl = document.createElement('span');
+    amountEl.className = 'price-amount';
+    amountEl.textContent = formatNumber(totalAmount) + ' ₽';
 
-      div.appendChild(spanName);
-      div.appendChild(spanAmount);
-      expensesEl.appendChild(div);
-    }
+    div.appendChild(nameEl);
+    div.appendChild(amountEl);
+    expensesEl.appendChild(div);
   }
 
   if (!hasExpenses) {
@@ -683,21 +720,22 @@ function renderStats() {
   }
 }
 
+/* ==========================================================================
+   Поиск и режим бухгалтера
+   ========================================================================== */
 function filterRows() {
-  const inputEl = document.getElementById('search');
+  const q = document.getElementById('search').value.trim().toLowerCase();
   const rowCountEl = document.getElementById('rowCount');
-  const q = inputEl.value.trim().toLowerCase();
   const rows = document.querySelectorAll('#tableBody tr');
 
   // Режим бухгалтера: секретный токен — показать всех
-  if (SECRET_TOKEN && q === String(SECRET_TOKEN).toLowerCase()) {
+  if (SECRET_TOKEN && q === SECRET_TOKEN.toLowerCase()) {
     rows.forEach(tr => tr.classList.remove('hidden'));
     rowCountEl.textContent = `Все записи (${rows.length})`;
     rowCountEl.classList.add('accountant-mode');
     return;
   }
 
-  // Обычный режим
   rowCountEl.classList.remove('accountant-mode');
 
   if (q.length < 2) {
@@ -709,9 +747,12 @@ function filterRows() {
   let found = 0;
   rows.forEach(tr => {
     const nameCell = tr.cells[0];
-    const isMatch = nameCell && nameCell.textContent.toLowerCase().includes(q);
-    if (isMatch) { tr.classList.remove('hidden'); found++; }
-    else { tr.classList.add('hidden'); }
+    if (nameCell && nameCell.textContent.toLowerCase().includes(q)) {
+      tr.classList.remove('hidden');
+      found++;
+    } else {
+      tr.classList.add('hidden');
+    }
   });
 
   rowCountEl.textContent = found > 0 ? `Найдено: ${found}` : 'Не найдено';
