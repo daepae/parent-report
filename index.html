@@ -5,13 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Отчёт родительского комитета</title>
 
-<!-- Библиотека для чтения xlsx с сохранением цветов заливки -->
+<!-- ExcelJS — чтение xlsx с сохранением цветов заливки -->
 <script src="exceljs.min.js"></script>
 
 <style>
-  /* ==========================================================================
-     CSS-переменные (цвета, радиусы, тени)
-     ========================================================================== */
   :root {
     --bg: #f8fafc; --card: #fff; --text: #0f172a; --muted: #64748b;
     --border: #e2e8f0; --border-soft: #f1f5f9;
@@ -21,7 +18,6 @@
     --shadow: 0 1px 3px rgba(15,23,42,.06), 0 1px 2px -1px rgba(15,23,42,.06);
   }
 
-  /* Сброс отступов и базовые настройки шрифта */
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0;
@@ -30,34 +26,23 @@
     font-size: 14px; line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-
-  /* Универсальное правило: любой элемент с атрибутом hidden — невидим */
   [hidden] { display: none !important; }
 
-  /* ==========================================================================
-     Общий каркас страницы
-     ========================================================================== */
   .container { width: 100%; max-width: 100%; margin: 0 auto; padding: 24px 32px 48px; }
   h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; letter-spacing: -.01em; }
   .subtitle { color: var(--muted); font-size: 13px; margin: 0; }
   header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
 
-  /* Вкладки «Мой ребенок» / «Статистика класса» */
   .tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
   .tab-btn { background: transparent; border: none; padding: 8px 16px; font-size: 15px; font-weight: 600; color: var(--muted); cursor: pointer; border-radius: var(--radius-sm); transition: all 0.2s; }
   .tab-btn:hover { background: var(--border-soft); color: var(--text); }
   .tab-btn.active { background: var(--accent); color: #fff; }
 
-  /* Общие карточки для таблицы и дашборда */
   .table-section, .dashboard-section { background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; }
 
-  /* ==========================================================================
-     Панель поиска
-     ========================================================================== */
   .toolbar { padding: 16px 20px; border-bottom: 1px solid var(--border-soft); }
   .search-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .search-wrap { position: relative; flex: 1; min-width: 250px; max-width: 500px; }
-  /* Иконка лупы позиционируется абсолютно внутри обёртки */
   .search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
   .search-wrap input {
     width: 100%; padding: 9px 12px 9px 36px; font-size: 14px;
@@ -66,108 +51,74 @@
   }
   .search-wrap input:focus { outline: none; border-color: var(--accent); background: var(--card); box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
 
-  /* Счётчик справа от поиска: «Список скрыт» / «Найдено: N» */
   .row-count { font-size: 13px; color: var(--muted); margin-left: auto; }
-  /* Стиль счётчика в режиме бухгалтера (секретный токен) */
   .row-count.accountant-mode {
-    background: #dbeafe;
-    color: #1d4ed8;
-    font-weight: 600;
-    padding: 3px 10px;
-    border-radius: 6px;
-    letter-spacing: .01em;
+    background: #dbeafe; color: #1d4ed8; font-weight: 600;
+    padding: 3px 10px; border-radius: 6px; letter-spacing: .01em;
   }
 
-  /* ==========================================================================
-     Таблица
-     ========================================================================== */
   .table-wrapper { overflow-x: auto; width: 100%; max-height: 70vh; }
   table { width: auto; min-width: 100%; border-collapse: collapse; font-size: 14px; }
 
-  /* Закреплённая шапка при скролле */
   thead { position: sticky; top: 0; z-index: 10; }
   th { background: #f8fafc; color: var(--muted); font-weight: 600; text-align: left; padding: 12px 16px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none; }
 
-  /* Вторая строка шапки — итоги (выделена зелёным цветом) */
   #tableHeadTotals th { background: #f1f5f9; color: var(--text); font-weight: 700; text-transform: none; font-size: 14px; padding: 10px 16px; border-bottom: 2px solid var(--border); }
   #tableHeadTotals th.num { color: var(--success); font-size: 15px; }
 
-  /* Обычные ячейки */
   td { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
   tbody tr { transition: background .1s; }
   tbody tr:hover { background: #f8fafc; }
   tbody tr:last-child td { border-bottom: none; }
   tbody tr.hidden { display: none !important; }
 
-  /* Строка ребёнка, у которого есть хоть один долг (светло-розовый фон) */
   tbody tr.row-unpaid { background-color: #fff1f2 !important; }
   tbody tr.row-unpaid:hover { background-color: #ffe4e6 !important; }
 
-  /* Ячейка с конкретным долгом: темнее фона строки + красная полоса слева */
   td.cell-unpaid {
     background-color: #fecaca;
     color: var(--danger) !important;
     font-weight: 700;
     box-shadow: inset 3px 0 0 #dc2626;
   }
-  /* При наведении на строку ячейка долга становится ещё темнее */
-  tbody tr.row-unpaid:hover td.cell-unpaid {
-    background-color: #fca5a5;
-  }
-  /* Маленький «×» перед суммой долга — маркер, не сливается с текстом */
+  tbody tr.row-unpaid:hover td.cell-unpaid { background-color: #fca5a5; }
   td.cell-unpaid::before {
-    content: '×';
-    display: inline-block;
-    font-size: 12px;
-    font-weight: 800;
-    line-height: 1;
-    vertical-align: 1px;
-    margin-right: 4px;
-    color: #b91c1c;
-    opacity: 0.9;
+    content: '×'; display: inline-block; font-size: 12px; font-weight: 800;
+    line-height: 1; vertical-align: 1px; margin-right: 4px; color: #b91c1c; opacity: 0.9;
   }
 
-  /* Числовые ячейки — выравнивание вправо и табличные цифры */
   th.num, td.num { text-align: right; }
   td.num { font-variant-numeric: tabular-nums; }
 
-  /* Прочие статусы ячеек */
-  td.zero { color: #cbd5e1; }          /* пустые / нулевые значения */
-  td.negative { color: var(--danger); } /* отрицательный остаток */
-  td.paid { color: var(--success); font-weight: 600; }   /* сдал (в «Сдали») */
-  td.unpaid { color: var(--danger); font-weight: 600; }  /* не сдал (в «Сдали») */
-  td.excused { color: #8b5cf6 !important; font-weight: 600; font-size: 13px; } /* б/н */
+  td.zero { color: #cbd5e1; }
+  td.negative { color: var(--danger); }
+  td.paid { color: var(--success); font-weight: 600; }
+  td.unpaid { color: var(--danger); font-weight: 600; }
+  td.excused { color: #8b5cf6 !important; font-weight: 600; font-size: 13px; }
 
-  /* ==========================================================================
-     Дашборд
-     ========================================================================== */
   .dashboard-section { padding: 24px; }
 
-  /* KPI-карточки: Собрано / Потрачено / Остаток */
   .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); }
-  .kpi-label { font-size: 13px; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; letter-spacing: 0.5px;}
+  .kpi-label { font-size: 13px; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; letter-spacing: 0.5px; }
   .kpi-value { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
   .kpi-value.green { color: var(--success); }
   .kpi-value.blue { color: var(--accent); }
   .kpi-value.red { color: var(--danger); }
 
-  /* Две карточки внизу: статус сборов и список расходов */
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
   .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; }
   .stat-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text); flex-shrink: 0; }
 
-  /* Блок «Статус сборов» — простой список с цветными числами */
   .status-list { display: flex; flex-direction: column; gap: 16px; }
   .status-item { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-soft); padding-bottom: 12px; }
   .status-item:last-child { border-bottom: none; padding-bottom: 0; }
   .status-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   .status-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .status-value.green { color: var(--success); }
-  .status-value.yellow { color: #ca8a04; } /* тёмно-жёлтый, читаемый на белом */
+  .status-value.yellow { color: #ca8a04; }
   .status-value.red { color: var(--danger); }
 
-  /* Блок «На что потрачены деньги» */
   .price-list { display: flex; flex-direction: column; gap: 0; max-height: 400px; overflow-y: auto; padding-right: 8px; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
   .price-list::-webkit-scrollbar { width: 6px; }
   .price-list::-webkit-scrollbar-track { background: transparent; }
@@ -180,18 +131,12 @@
   .price-name { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); line-height: 1.4; flex: 1; }
   .price-amount { font-size: 15px; font-weight: 700; color: var(--success); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-  /* ==========================================================================
-     Загрузка и ошибки
-     ========================================================================== */
   .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--muted); gap: 16px; }
   .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 20px; border-radius: var(--radius); font-size: 14px; line-height: 1.6; margin-top: 20px; word-break: break-word; }
 
-  /* ==========================================================================
-     Адаптив под мобильные устройства
-     ========================================================================== */
   @media (max-width: 768px) {
     .container { padding: 16px 12px; }
     header { flex-direction: column; }
@@ -205,7 +150,6 @@
 <body>
 <div class="container">
 
-  <!-- Шапка с заголовком и датой последнего обновления -->
   <header>
     <div>
       <h1 id="pageTitle">Отчёт родительского комитета</h1>
@@ -213,60 +157,48 @@
     </div>
   </header>
 
-  <!-- Экран загрузки (виден, пока читается data.xlsx) -->
   <div id="loading" class="loading">
     <div class="spinner"></div>
     <p>Загружаем данные…</p>
   </div>
 
-  <!-- Плашка с ошибкой (скрыта по умолчанию) -->
   <div id="error" class="error" hidden></div>
 
-  <!-- Основной контент (скрыт до завершения загрузки) -->
   <div id="content" hidden>
 
-    <!-- Вкладки -->
-    <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('students')">Мой ребенок</button>
-      <button class="tab-btn" onclick="switchTab('stats')">Статистика класса</button>
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" data-tab="students" role="tab" aria-selected="true">Мой ребенок</button>
+      <button class="tab-btn" data-tab="stats" role="tab" aria-selected="false">Статистика класса</button>
     </div>
 
-    <!-- ВКЛАДКА 1: таблица детей -->
-    <div id="tab-students">
+    <div id="tab-students" role="tabpanel">
       <section class="table-section">
-
-        <!-- Поиск по фамилии -->
         <div class="toolbar">
           <div class="search-row">
             <div class="search-wrap">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <circle cx="11" cy="11" r="7"></circle>
                 <path d="m21 21-4.3-4.3"></path>
               </svg>
-              <input type="search" id="search" placeholder="Введите 2+ буквы фамилии..." autocomplete="off">
+              <input type="search" id="search" placeholder="Введите 2+ буквы фамилии..." autocomplete="off" spellcheck="false" aria-label="Поиск по фамилии">
             </div>
-            <span class="row-count" id="rowCount">Список скрыт</span>
+            <span class="row-count" id="rowCount" aria-live="polite">Список скрыт</span>
           </div>
         </div>
-
-        <!-- Таблица: шапка и строки заполняются из JS -->
         <div class="table-wrapper">
           <table id="dataTable">
             <thead>
-              <tr id="tableHead"></tr>          <!-- названия столбцов -->
-              <tr id="tableHeadTotals"></tr>    <!-- итоги по столбцам -->
+              <tr id="tableHead"></tr>
+              <tr id="tableHeadTotals"></tr>
             </thead>
-            <tbody id="tableBody"></tbody>      <!-- строки детей -->
+            <tbody id="tableBody"></tbody>
           </table>
         </div>
       </section>
     </div>
 
-    <!-- ВКЛАДКА 2: дашборд -->
-    <div id="tab-stats" hidden>
+    <div id="tab-stats" hidden role="tabpanel">
       <section class="dashboard-section">
-
-        <!-- KPI-карточки -->
         <div class="kpi-grid">
           <div class="kpi-card">
             <div class="kpi-label">Собрано всего</div>
@@ -281,8 +213,6 @@
             <div class="kpi-value" id="kpi-balance">0 ₽</div>
           </div>
         </div>
-
-        <!-- Статус сборов и список расходов -->
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-title">Статус сборов</div>
@@ -299,88 +229,90 @@
 </div>
 
 <script>
+'use strict';
+
 /* ==========================================================================
-   1. ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+   1. СОСТОЯНИЕ
    ========================================================================== */
 
-/* Секретный токен для бухгалтера: если ввести в поиск — покажет всех.
-   Если хотите свой пароль, поменяйте эту строку. */
 const SECRET_TOKEN = '#all#';
 
-/* Структура с распарсенными данными из Excel.
-   Заполняется в parseData() и используется во всех функциях отрисовки. */
 let globalData = {
-  dataRows: [],         // строки с данными детей (без шапки и итогов)
-  headerRow: [],        // первая строка Excel — названия столбцов
-  numericCols: [],      // индексы столбцов, в которых есть числа
-  totalCols: 0,         // всего столбцов в таблице
-  statusColIndex: -1,   // индекс столбца «Сдали» (заполняется в parseData)
-  remainingColIndex: -1 // индекс столбца «Остаток» (заполняется в parseData)
+  dataRows: [],
+  headerRow: [],
+  numericCols: [],
+  totalCols: 0,
+  statusColIndex: -1,
+  remainingColIndex: -1
 };
 
-/* Флаг «уже случилась ошибка». Нужен, чтобы после таймаута не показать
-   пользователю и ошибку, и таблицу одновременно. */
-let hasError = false;
+/* Кэш итогов. Пересчитывается ТОЛЬКО в parseData(). */
+let globalTotals = {
+  totals: [],
+  collected: 0,
+  spent: 0,
+  expenseTotals: {}
+};
 
-/* Контроллер для отмены fetch, если пользователь уйдёт со страницы
-   или сработает таймаут. */
+let hasError = false;
 let abortController = null;
 
 /* ==========================================================================
-   2. ОБРАБОТКА ОШИБОК И ТАЙМАУТ
+   2. ОШИБКИ И ТАЙМАУТ
    ========================================================================== */
 
-/* Ловим любые необработанные исключения в JS — показываем пользователю плашку */
 window.addEventListener('error', function (e) {
   showError('Ошибка в скрипте: ' + (e.message || 'неизвестная ошибка'));
 });
 
-/* Ловим необработанные Promise rejection (например, fetch упал без catch) */
 window.addEventListener('unhandledrejection', function (e) {
-  showError('Ошибка загрузки: ' + (e.reason?.message || e.reason || 'неизвестная ошибка'));
+  const reason = e.reason;
+  const msg = (reason && reason.message) || String(reason) || 'неизвестная ошибка';
+  showError('Ошибка загрузки: ' + msg);
 });
 
-/* Таймаут: если через 15 секунд файл не загрузился — показываем ошибку
-   и отменяем запрос, чтобы не держать соединение. */
 const loadTimeout = setTimeout(() => {
   if (abortController) abortController.abort();
   showError('Превышено время ожидания (15 сек). Проверьте интернет.');
 }, 15000);
 
-/* Единая функция показа ошибки.
-   Скрывает загрузку и контент, показывает красную плашку. */
 function showError(msg) {
+  if (hasError) return;
   hasError = true;
-  clearTimeout(loadTimeout); // отменяем таймаут, ошибка уже показана
+  clearTimeout(loadTimeout);
 
   document.getElementById('loading').hidden = true;
   document.getElementById('content').hidden = true;
 
   const el = document.getElementById('error');
   el.hidden = false;
-
-  // Сначала статичный HTML, потом текст ошибки через textContent —
-  // чтобы любые символы в msg не сломали разметку (XSS-защита).
   el.innerHTML = '<strong>Не удалось загрузить данные.</strong><br>Проверьте файлы в репозитории.<br><small></small>';
-  el.querySelector('small').textContent = msg;
+  el.querySelector('small').textContent = String(msg || 'неизвестная ошибка');
 }
 
 /* ==========================================================================
-   3. ПЕРЕКЛЮЧЕНИЕ ВКЛАДОК
+   3. ВКЛАДКИ
    ========================================================================== */
+
 function switchTab(tabName) {
-  // Сначала прячем обе вкладки и снимаем активный класс со всех кнопок
   document.getElementById('tab-students').hidden = true;
   document.getElementById('tab-stats').hidden = true;
-  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-  // Затем показываем нужную и подсвечиваем её кнопку
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('active');
+    btn.setAttribute('aria-selected', 'false');
+  });
+
+  const activeBtn = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
+  if (activeBtn) {
+    activeBtn.classList.add('active');
+    activeBtn.setAttribute('aria-selected', 'true');
+  }
+
   if (tabName === 'students') {
     document.getElementById('tab-students').hidden = false;
-    document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
   } else {
     document.getElementById('tab-stats').hidden = false;
-    document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
   }
 }
 
@@ -388,52 +320,52 @@ function switchTab(tabName) {
    4. УТИЛИТЫ
    ========================================================================== */
 
-/* Преобразует значение из ячейки в число.
-   Корректно переваривает "5 000,00 ₽", "- ₽", "б/н", "123.45".
-   Возвращает 0, если распарсить не удалось. */
+/* Устойчивый разбор: "5 000,00 ₽", "123.45", "1,234.56", "1.234,56",
+   "б/н", "-500". Возвращает 0 при невозможности распарсить. */
 function safeParseNumber(val) {
-  if (typeof val === 'number') return isFinite(val) ? val : 0;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
   if (val === null || val === undefined || val === '') return 0;
-  if (val instanceof Date) return 0;
+  if (Object.prototype.toString.call(val) === '[object Date]') return 0;
 
-  // Оставляем только цифры, точку, запятую и минус
-  const str = String(val).replace(/[^\d.,-]/g, '').replace(',', '.');
-  const num = parseFloat(str);
+  let s = String(val).replace(/[^\d.,-]/g, '');
+  if (!s) return 0;
 
-  return isNaN(num) ? 0 : num;
+  const lastDot = s.lastIndexOf('.');
+  const lastComma = s.lastIndexOf(',');
+
+  if (lastDot >= 0 && lastComma >= 0) {
+    if (lastDot > lastComma) {
+      s = s.replace(/,/g, '');
+    } else {
+      s = s.replace(/\./g, '').replace(',', '.');
+    }
+  } else if (lastComma >= 0) {
+    s = s.replace(',', '.');
+  }
+
+  const num = parseFloat(s);
+  return Number.isFinite(num) ? num : 0;
 }
 
-/* Округление до копеек. Нужно, потому что в JS 0.1 + 0.2 = 0.30000000000000004. */
 function round2(num) {
+  if (!Number.isFinite(num)) return 0;
   return Math.round(num * 100) / 100;
 }
 
-/* Красивый вывод числа для пользователя: с пробелами между тысячами и запятой. */
 function formatNumber(v) {
-  if (typeof v !== 'number' || !isFinite(v)) return '0';
+  if (typeof v !== 'number' || !Number.isFinite(v)) return '0';
   if (Math.abs(v) < 0.01) return '0';
   return v.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 }
 
-/* Достаёт «сырое» значение из ячейки ExcelJS.
-   ExcelJS может возвращать разные структуры:
-   - просто число/строку/boolean/Date
-   - { formula, result } — формула с вычисленным результатом
-   - { richText: [{text}] } — форматированный текст
-   - { text, hyperlink } — гиперссылка
-   - { error } — ячейка с ошибкой Excel
-   Эта функция всё это разворачивает в одно простое значение. */
 function extractCellValue(v) {
   if (v === null || v === undefined) return '';
-
   const t = typeof v;
   if (t === 'number' || t === 'string' || t === 'boolean') return v;
-  if (v instanceof Date) return v;
+  if (Object.prototype.toString.call(v) === '[object Date]') return v;
 
-  // Форматированный текст (разные цвета/шрифты внутри одной ячейки)
   if (v.richText) return v.richText.map(r => r.text || '').join('');
 
-  // Формула: берём вычисленный результат
   if ('result' in v) {
     const r = v.result;
     if (r === null || r === undefined) return '';
@@ -444,25 +376,16 @@ function extractCellValue(v) {
     return r;
   }
 
-  // Ячейка с ошибкой Excel (#REF!, #DIV/0! и т.п.) — считаем пустой
   if ('error' in v) return '';
-
-  // Гиперссылка
   if ('text' in v) return v.text;
-
   return '';
 }
 
-/* Определяет статус ячейки по цвету заливки.
-   Возвращает:
-   - 'paid'    — зелёная ячейка (сдал)
-   - 'excused' — жёлтая (уважительная причина, б/н)
-   - 'debt'    — красная или без заливки (долг) */
+/* Определение статуса по цвету заливки. Только канонические RGB:
+   C6EFCE → paid; FFEB9C/FFFF00 → excused; FFC7CE → debt; иначе → debt. */
 function getCellStatus(cell) {
   try {
     const fill = cell.fill;
-
-    // Нет заливки вообще → это не «сдал» и не «б/н», значит, долг
     if (!fill || fill.type !== 'pattern' || fill.pattern !== 'solid') return 'debt';
 
     const fg = fill.fgColor;
@@ -471,40 +394,32 @@ function getCellStatus(cell) {
     let rgb = '';
     if (fg.argb) rgb = String(fg.argb).toUpperCase();
 
-    // Стандартные стили Excel "Good/Neutral/Bad" — это индексированные цвета
     if (!rgb && fg.indexed !== undefined) {
       const map = { 42: 'C6EFCE', 43: 'FFEB9C', 44: 'FFC7CE' };
       rgb = map[fg.indexed] || '';
     }
 
     if (!rgb) return 'debt';
-
-    // Убираем альфа-канал (прозрачность) в начале: FF C6EFCE → C6EFCE
     if (rgb.length === 8 && rgb.startsWith('FF')) rgb = rgb.substring(2);
 
     if (rgb === 'C6EFCE') return 'paid';
     if (rgb === 'FFEB9C' || rgb === 'FFFF00') return 'excused';
     if (rgb === 'FFC7CE') return 'debt';
-
     return 'debt';
   } catch (e) {
-    // Любая неожиданная структура ячейки → считаем долгом, не падаем
     return 'debt';
   }
 }
 
+/* Единый предикат «ячейка = долг»: используется в таблице и дашборде. */
+function isDebtCell(row, c) {
+  return row[c].status === 'debt' && safeParseNumber(row[c].v) > 0;
+}
+
 /* ==========================================================================
-   5. ЕДИНАЯ ТОЧКА ПОДСЧЁТА ВСЕХ СУММ
+   5. РАСЧЁТЫ (единственная точка)
    ========================================================================== */
 
-/* Считает все итоги разом. Используется и в шапке таблицы, и в дашборде —
-   чтобы там и там были одинаковые числа.
-   
-   Возвращает:
-   - totals        — итоги по каждому столбцу (Остаток пересчитан)
-   - collected     — сколько всего сдали
-   - spent         — сколько всего потрачено (без жёлтых ячеек)
-   - expenseTotals — расходы по категориям */
 function computeTotals() {
   const { dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
   const numericSet = new Set(numericCols);
@@ -515,16 +430,12 @@ function computeTotals() {
   let spent = 0;
 
   dataRows.forEach(row => {
-    // --- Столбец «Сдали»: суммируем всё, независимо от цвета ---
     const paidVal = safeParseNumber(row[statusColIndex].v);
     totals[statusColIndex] = round2(totals[statusColIndex] + paidVal);
     collected = round2(collected + paidVal);
 
-    // --- Столбцы расходов (с 3-го по предпоследний) ---
     for (let c = 3; c < totalCols; c++) {
       if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
-
-      // Жёлтые (уважительная причина) не считаем расходом
       if (row[c].status === 'excused') continue;
 
       const val = safeParseNumber(row[c].v);
@@ -534,14 +445,45 @@ function computeTotals() {
     }
   });
 
-  // «Остаток» = сдали − потратили. Не доверяем Excel-формуле, считаем сами.
   totals[remainingColIndex] = round2(totals[statusColIndex] - spent);
 
   return { totals, collected, spent, expenseTotals };
 }
 
+/* Статистика по одному ребёнку. Единая семантика для таблицы и дашборда. */
+function computeChildStats(row) {
+  const { numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
+  const numericSet = new Set(numericCols);
+
+  const childPaid = safeParseNumber(row[statusColIndex].v);
+  let hasAnyPayment = childPaid > 0;
+  let hasDebt = false;
+  let childSpent = 0;
+
+  for (let c = 3; c < totalCols; c++) {
+    if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
+    if (row[c].status === 'excused') continue;
+
+    const val = safeParseNumber(row[c].v);
+    childSpent = round2(childSpent + val);
+
+    if (val > 0) {
+      if (row[c].status === 'paid') hasAnyPayment = true;
+      else if (row[c].status === 'debt') hasDebt = true;
+    }
+  }
+
+  return {
+    childPaid,
+    childSpent,
+    childBalance: round2(childPaid - childSpent),
+    hasAnyPayment,
+    hasDebt
+  };
+}
+
 /* ==========================================================================
-   6. ЗАГРУЗКА ФАЙЛА
+   6. ЗАГРУЗКА
    ========================================================================== */
 
 async function init() {
@@ -549,47 +491,42 @@ async function init() {
   abortController = new AbortController();
 
   try {
-    // Проверяем, что библиотека подключилась
     if (typeof ExcelJS === 'undefined') {
       throw new Error('Библиотека exceljs.min.js не найдена.');
     }
 
-    // Загружаем data.xlsx
     const resp = await fetch('data.xlsx', { cache: 'no-store', signal: abortController.signal });
     if (!resp.ok) throw new Error('Файл не найден (HTTP ' + resp.status + ')');
 
-    // Показываем дату последнего изменения файла (если сервер её отдаёт)
     const lm = resp.headers.get('Last-Modified');
     if (lm) {
       const d = new Date(lm);
       if (!isNaN(d.getTime())) {
         const dateStr = d.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', year: 'numeric' });
         const timeStr = d.toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' });
-        document.getElementById('lastUpdated').textContent = `Обновлено: ${dateStr} в ${timeStr}`;
+        document.getElementById('lastUpdated').textContent = 'Обновлено: ' + dateStr + ' в ' + timeStr;
       }
     }
 
-    // Читаем файл через ExcelJS
     const buf = await resp.arrayBuffer();
+    clearTimeout(loadTimeout); // сеть завершена — таймаут больше не нужен
+
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf);
 
     const ws = wb.worksheets[0];
     if (!ws) throw new Error('В файле нет листов');
 
-    // Определяем максимальное количество столбцов.
-    // Все строки выравниваем по нему, чтобы не было «коротких» строк.
     const columns = Math.max(1, ws.columnCount || 0);
     const rows = [];
 
-    // Проходим по каждой непустой строке листа
     ws.eachRow({ includeEmpty: false }, (row) => {
       const cells = [];
       for (let c = 1; c <= columns; c++) {
         const cell = row.getCell(c);
         cells.push({
-          v: extractCellValue(cell.value),  // значение
-          status: getCellStatus(cell)       // статус по цвету
+          v: extractCellValue(cell.value),
+          status: getCellStatus(cell)
         });
       }
       rows.push(cells);
@@ -597,28 +534,27 @@ async function init() {
 
     if (rows.length === 0) throw new Error('Файл не содержит данных.');
 
-    // Передаём данные в парсер
     parseData(rows, columns);
 
-    // Скрываем загрузку и показываем контент
-    clearTimeout(loadTimeout);
     if (!hasError) {
       document.getElementById('loading').hidden = true;
       document.getElementById('content').hidden = false;
     }
   } catch (e) {
-    if (e.name === 'AbortError') return; // отменили сами — молчим
-    if (e.message === 'Failed to fetch') showError('Нет подключения к интернету. Проверьте сеть.');
-    else showError(e.message);
+    clearTimeout(loadTimeout);
+    if (e && e.name === 'AbortError') return;
+    if (e && e.message === 'Failed to fetch') {
+      showError('Нет подключения к интернету. Проверьте сеть.');
+    } else {
+      showError((e && e.message) || String(e) || 'неизвестная ошибка');
+    }
   }
 }
 
 /* ==========================================================================
-   7. ПАРСИНГ ДАННЫХ
+   7. ПАРСИНГ
    ========================================================================== */
 
-/* Находит нужные столбцы, отсеивает служебные строки,
-   определяет числовые столбцы и запускает отрисовку. */
 function parseData(rows, totalCols) {
   if (!rows || rows.length === 0) throw new Error('Файл пуст.');
 
@@ -628,18 +564,18 @@ function parseData(rows, totalCols) {
   let statusColIndex = -1;
   let remainingColIndex = -1;
 
-  // Ищем столбцы «Сдали» и «Остаток» по названию
   headerRow.forEach((title, idx) => {
     const t = String(title || '').toLowerCase();
     if (t.includes('сдал') || t.includes('оплата') || t.includes('взнос')) statusColIndex = idx;
     if (t.includes('остаток') || t.includes('долг')) remainingColIndex = idx;
   });
 
-  // Если не нашли — дальше считать нечего
   if (statusColIndex === -1) throw new Error('В шапке не найден столбец «Сдали»');
   if (remainingColIndex === -1) throw new Error('В шапке не найден столбец «Остаток»');
+  if (statusColIndex === 0) throw new Error('Столбец «Сдали» не может быть первым — там ФИО');
+  if (remainingColIndex === 0) throw new Error('Столбец «Остаток» не может быть первым — там ФИО');
+  if (statusColIndex === remainingColIndex) throw new Error('Столбцы «Сдали» и «Остаток» совпадают — проверьте шапку');
 
-  // Проходим по строкам, начиная со второй (первая — шапка)
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.length === 0) continue;
@@ -648,12 +584,7 @@ function parseData(rows, totalCols) {
     if (!name) continue;
 
     const lower = name.toLowerCase();
-
-    // Пропускаем итоговые строки: «Итог», «Итого по классу», «Всего», «Общий»
     if (lower.startsWith('итог') || lower === 'всего' || lower === 'общий') continue;
-
-    // Имя ребёнка должно содержать хотя бы одну букву
-    // (отсекает строки вроде «—», «5», пустые артефакты)
     if (!/[а-яёa-z]/i.test(name)) continue;
 
     dataRows.push(r);
@@ -661,7 +592,6 @@ function parseData(rows, totalCols) {
 
   if (dataRows.length === 0) throw new Error('Не найдено строк с именами детей.');
 
-  // Определяем, какие столбцы числовые — в них есть хотя бы одно число
   const numericCols = [];
   for (let c = 1; c < totalCols; c++) {
     let hasNum = false;
@@ -672,41 +602,45 @@ function parseData(rows, totalCols) {
     if (hasNum) numericCols.push(c);
   }
 
-  // Сохраняем всё в глобальное состояние
   globalData = { dataRows, headerRow, numericCols, totalCols, statusColIndex, remainingColIndex };
 
-  // Отрисовываем таблицу и дашборд
+  // Единственный вызов — кэшируем.
+  globalTotals = computeTotals();
+
   renderTable();
   renderStats();
 
-  // Навешиваем обработчик поиска (один раз)
   const searchInput = document.getElementById('search');
   if (!searchInput.dataset.listenerAttached) {
     searchInput.addEventListener('input', filterRows);
+    searchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        searchInput.value = '';
+        filterRows();
+      }
+    });
     searchInput.dataset.listenerAttached = '1';
   }
   filterRows();
 }
 
 /* ==========================================================================
-   8. ОТРИСОВКА ТАБЛИЦЫ
+   8. ТАБЛИЦА
    ========================================================================== */
 
 function renderTable() {
   const { headerRow, dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
   const numericSet = new Set(numericCols);
-  const { totals } = computeTotals(); // единый расчёт итогов
+  const { totals } = globalTotals;
 
   const theadMain = document.getElementById('tableHead');
   const theadTotals = document.getElementById('tableHeadTotals');
   const tbody = document.getElementById('tableBody');
 
-  // Очищаем предыдущее содержимое
   theadMain.innerHTML = '';
   theadTotals.innerHTML = '';
   tbody.innerHTML = '';
 
-  // --- Шапка: названия столбцов ---
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
     th.textContent = String(headerRow[c] || '');
@@ -714,52 +648,28 @@ function renderTable() {
     theadMain.appendChild(th);
   }
 
-  // --- Вторая строка шапки: итоговые суммы ---
   for (let c = 0; c < totalCols; c++) {
     const th = document.createElement('th');
-    if (numericSet.has(c)) {
+    if (numericSet.has(c) || c === statusColIndex || c === remainingColIndex) {
       th.classList.add('num');
-      th.textContent = formatNumber(totals[c]);
+      th.textContent = formatNumber(totals[c] || 0);
     }
     theadTotals.appendChild(th);
   }
 
-  // --- Тело таблицы: по строке на ребёнка ---
-  // DocumentFragment добавляет элементы в DOM быстрее, чем по одному
   const fragment = document.createDocumentFragment();
 
   dataRows.forEach(row => {
     const tr = document.createElement('tr');
-    tr.classList.add('hidden'); // скрыта до ввода фамилии в поиск
+    tr.classList.add('hidden');
 
-    // Проверяем, есть ли в строке хоть один долг — для подсветки всей строки
-    let isRowUnpaid = false;
-    for (let c = 3; c < totalCols; c++) {
-      if (!numericSet.has(c) || c === remainingColIndex) continue;
-      if (row[c].status === 'debt' && safeParseNumber(row[c].v) > 0) {
-        isRowUnpaid = true;
-        break;
-      }
-    }
-    if (isRowUnpaid) tr.classList.add('row-unpaid');
+    const stats = computeChildStats(row);
+    if (stats.hasDebt) tr.classList.add('row-unpaid');
 
-    // Считаем личный остаток ребёнка (без жёлтых ячеек)
-    const childPaid = safeParseNumber(row[statusColIndex].v);
-    let childSpent = 0;
-    for (let c = 3; c < totalCols; c++) {
-      if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
-      if (row[c].status !== 'excused') {
-        childSpent = round2(childSpent + safeParseNumber(row[c].v));
-      }
-    }
-    const childBalance = round2(childPaid - childSpent);
-
-    // Заполняем ячейки строки
     for (let c = 0; c < totalCols; c++) {
       const td = document.createElement('td');
       const isNum = numericSet.has(c);
 
-      // --- Нечисловой столбец (например, имя ребёнка) ---
       if (!isNum) {
         const s = row[c].v === '' || row[c].v == null ? '—' : String(row[c].v);
         td.textContent = s;
@@ -770,40 +680,34 @@ function renderTable() {
 
       td.classList.add('num');
 
-      // --- Столбец «Остаток» (считаем сами, не берём из Excel) ---
       if (c === remainingColIndex) {
-        if (Math.abs(childBalance) < 0.01) {
+        if (Math.abs(stats.childBalance) < 0.01) {
           td.textContent = '—';
           td.classList.add('zero');
         } else {
-          td.textContent = formatNumber(childBalance);
-          if (childBalance < 0) td.classList.add('negative');
+          td.textContent = formatNumber(stats.childBalance);
+          if (stats.childBalance < 0) td.classList.add('negative');
         }
         tr.appendChild(td);
         continue;
       }
 
-      // --- Остальные числовые ячейки: «Сдали» и столбцы расходов ---
       const val = safeParseNumber(row[c].v);
       const status = row[c].status;
 
       if (status === 'excused') {
-        // Жёлтая ячейка: показываем текст (обычно «б/н»)
         td.textContent = String(row[c].v || 'б/н');
         td.classList.add('excused');
       } else if (val === 0) {
-        // Пусто или ноль — просто прочерк
         td.textContent = '—';
         td.classList.add('zero');
         if (c === statusColIndex) td.classList.add('unpaid');
       } else {
-        // Ненулевое значение
         td.textContent = formatNumber(val);
         if (val < 0) td.classList.add('negative');
         if (c === statusColIndex) {
           td.classList.add('paid');
-        } else if (c > 2 && status === 'debt') {
-          // Расход с красной заливкой → это долг конкретного ребёнка
+        } else if (c > 2 && isDebtCell(row, c)) {
           td.classList.add('cell-unpaid');
         }
       }
@@ -814,7 +718,6 @@ function renderTable() {
     fragment.appendChild(tr);
   });
 
-  // Одним движением добавляем все строки в таблицу
   tbody.appendChild(fragment);
 }
 
@@ -825,57 +728,39 @@ function renderTable() {
 function renderStats() {
   const { headerRow, dataRows, numericCols, totalCols, statusColIndex, remainingColIndex } = globalData;
   const numericSet = new Set(numericCols);
-  const { collected, spent, expenseTotals } = computeTotals();
+  const { collected, spent, expenseTotals } = globalTotals;
   const balance = round2(collected - spent);
-  const studentsCount = Math.max(1, dataRows.length); // защита от деления на ноль
 
-  // --- KPI-карточки ---
   document.getElementById('kpi-collected').textContent = formatNumber(collected) + ' ₽';
   document.getElementById('kpi-spent').textContent = formatNumber(spent) + ' ₽';
 
   const balanceEl = document.getElementById('kpi-balance');
   balanceEl.textContent = formatNumber(balance) + ' ₽';
-  balanceEl.classList.toggle('red', balance < 0); // красный только если минус
+  balanceEl.classList.toggle('red', balance < 0);
 
-  // --- Статус сборов: считаем, сколько детей в каждой категории ---
   let fullyPaid = 0, partiallyPaid = 0, notPaid = 0;
 
   dataRows.forEach(row => {
-    let hasAnyPayment = safeParseNumber(row[statusColIndex].v) > 0;
-    let hasDebt = false;
-
-    for (let c = 3; c < totalCols; c++) {
-      if (!numericSet.has(c) || c === statusColIndex || c === remainingColIndex) continue;
-      if (row[c].status === 'excused') continue; // жёлтые не формируют долг
-
-      const val = safeParseNumber(row[c].v);
-      if (val <= 0) continue;
-      if (row[c].status === 'paid') hasAnyPayment = true;
-      else if (row[c].status === 'debt') hasDebt = true;
-    }
-
-    if (!hasDebt) fullyPaid++;
-    else if (hasAnyPayment) partiallyPaid++;
+    const stats = computeChildStats(row);
+    if (!stats.hasDebt) fullyPaid++;
+    else if (stats.hasAnyPayment) partiallyPaid++;
     else notPaid++;
   });
 
-  // Рисуем список с цветными числами
-  document.getElementById('paymentStats').innerHTML = `
-    <div class="status-item">
-      <span class="status-label">Сдали всё</span>
-      <span class="status-value green">${fullyPaid} чел.</span>
-    </div>
-    <div class="status-item">
-      <span class="status-label">Сдали частично</span>
-      <span class="status-value yellow">${partiallyPaid} чел.</span>
-    </div>
-    <div class="status-item">
-      <span class="status-label">Пока не сдавали</span>
-      <span class="status-value red">${notPaid} чел.</span>
-    </div>
-  `;
+  document.getElementById('paymentStats').innerHTML =
+    '<div class="status-item">' +
+      '<span class="status-label">Сдали всё</span>' +
+      '<span class="status-value green">' + fullyPaid + ' чел.</span>' +
+    '</div>' +
+    '<div class="status-item">' +
+      '<span class="status-label">Сдали частично</span>' +
+      '<span class="status-value yellow">' + partiallyPaid + ' чел.</span>' +
+    '</div>' +
+    '<div class="status-item">' +
+      '<span class="status-label">Пока не сдавали</span>' +
+      '<span class="status-value red">' + notPaid + ' чел.</span>' +
+    '</div>';
 
-  // --- Расходы по категориям ---
   const expensesEl = document.getElementById('expensesList');
   expensesEl.innerHTML = '';
   let hasExpenses = false;
@@ -891,7 +776,7 @@ function renderStats() {
 
     const nameEl = document.createElement('span');
     nameEl.className = 'price-name';
-    nameEl.textContent = headerRow[c] || `Колонка ${c + 1}`;
+    nameEl.textContent = headerRow[c] || ('Колонка ' + (c + 1));
 
     const amountEl = document.createElement('span');
     amountEl.className = 'price-amount';
@@ -908,33 +793,30 @@ function renderStats() {
 }
 
 /* ==========================================================================
-   10. ПОИСК И РЕЖИМ БУХГАЛТЕРА
+   10. ПОИСК
    ========================================================================== */
 
 function filterRows() {
-  const q = document.getElementById('search').value.trim().toLowerCase();
+  const input = document.getElementById('search');
+  const q = input.value.trim().toLowerCase();
   const rowCountEl = document.getElementById('rowCount');
   const rows = document.querySelectorAll('#tableBody tr');
 
-  // --- Режим бухгалтера: секретный токен показывает всех ---
   if (SECRET_TOKEN && q === SECRET_TOKEN.toLowerCase()) {
     rows.forEach(tr => tr.classList.remove('hidden'));
-    rowCountEl.textContent = `Все записи (${rows.length})`;
+    rowCountEl.textContent = 'Все записи (' + rows.length + ')';
     rowCountEl.classList.add('accountant-mode');
     return;
   }
 
-  // Обычный режим: снимаем синюю плашку
   rowCountEl.classList.remove('accountant-mode');
 
-  // --- Меньше 2 символов — прячем всё ---
   if (q.length < 2) {
     rows.forEach(tr => tr.classList.add('hidden'));
     rowCountEl.textContent = 'Список скрыт';
     return;
   }
 
-  // --- Ищем по фамилии ---
   let found = 0;
   rows.forEach(tr => {
     const nameCell = tr.cells[0];
@@ -946,7 +828,7 @@ function filterRows() {
     }
   });
 
-  rowCountEl.textContent = found > 0 ? `Найдено: ${found}` : 'Не найдено';
+  rowCountEl.textContent = found > 0 ? ('Найдено: ' + found) : 'Не найдено';
 }
 
 /* ==========================================================================
